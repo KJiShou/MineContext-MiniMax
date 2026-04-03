@@ -21,6 +21,7 @@ from opencontext.context_consumption.context_agent import ContextAgent
 from opencontext.context_consumption.context_agent.models import WorkflowStage
 from opencontext.context_consumption.context_agent.models.enums import EventType
 from opencontext.server.middleware.auth import auth_dependency
+from opencontext.server.utils import sanitize_assistant_content
 from opencontext.storage.global_storage import get_storage
 from opencontext.utils.logging_utils import get_logger
 
@@ -174,6 +175,7 @@ async def chat_stream(request: ChatRequest, _auth: str = auth_dependency):
                 args.update(request.context)
 
             accumulated_content = ""
+            visible_content = ""
             event_metadata = {}  # Store events by type
             interrupted = False  # Track if stream was interrupted
 
@@ -203,12 +205,25 @@ async def chat_stream(request: ChatRequest, _auth: str = auth_dependency):
                     elif event.type == EventType.STREAM_CHUNK:
                         # Only stream_chunk content goes to message.content
                         accumulated_content += event.content
-                        storage.append_message_content(
-                            message_id=assistant_message_id,
-                            content_chunk=event.content,
-                            token_count=1  # Approximate token count
-                        )
-                        logger.debug(f"Appended stream_chunk to message {assistant_message_id}: content_len={len(event.content)}")
+                        sanitized_content = sanitize_assistant_content(accumulated_content)
+                        if sanitized_content.startswith(visible_content):
+                            sanitized_chunk = sanitized_content[len(visible_content):]
+                        else:
+                            sanitized_chunk = sanitized_content
+
+                        converted_event["content"] = sanitized_chunk
+
+                        if sanitized_chunk:
+                            storage.append_message_content(
+                                message_id=assistant_message_id,
+                                content_chunk=sanitized_chunk,
+                                token_count=1  # Approximate token count
+                            )
+                            logger.debug(
+                                f"Appended sanitized stream_chunk to message {assistant_message_id}: content_len={len(sanitized_chunk)}"
+                            )
+
+                        visible_content = sanitized_content
                     else:
                         # Other event types (running, done, etc.) go to metadata as lists
                         event_type_key = event.type.value
@@ -221,6 +236,9 @@ async def chat_stream(request: ChatRequest, _auth: str = auth_dependency):
                             "progress": event.progress if hasattr(event, 'progress') else None,
                         })
                         logger.debug(f"Added {event_type_key} event to metadata for message {assistant_message_id}")
+
+                if event.type == EventType.COMPLETED and converted_event.get("content"):
+                    converted_event["content"] = sanitize_assistant_content(converted_event["content"])
 
                 yield f"data: {json.dumps(converted_event, ensure_ascii=False)}\n\n"
 
@@ -235,6 +253,12 @@ async def chat_stream(request: ChatRequest, _auth: str = auth_dependency):
 
                     # Mark assistant message as finished
                     if assistant_message_id:
+                        if accumulated_content:
+                            storage.update_message(
+                                message_id=assistant_message_id,
+                                new_content=sanitize_assistant_content(accumulated_content),
+                                is_complete=False,
+                            )
                         status = "completed" if event.stage == WorkflowStage.COMPLETED else "failed"
                         storage.mark_message_finished(
                             message_id=assistant_message_id,

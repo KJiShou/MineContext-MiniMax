@@ -44,6 +44,7 @@ dependencies = [
     "python-multipart",
     "playwright",
     "volcengine-python-sdk[ark]",
+    "httpx",
 ]
 
 [project.optional-dependencies]

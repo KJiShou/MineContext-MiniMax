@@ -9,6 +9,7 @@ import {
   WorkflowStage,
   chatStreamService
 } from '@renderer/services/ChatStreamService'
+import { sanitizeAssistantContent } from '@renderer/utils/chat-content'
 import { get } from 'lodash'
 
 export interface ChatState {
@@ -43,19 +44,16 @@ export const useChatStream = () => {
   const [streamingMessage, setStreamingMessage] = useState<StreamingMessage | null>(null)
   const currentStreamingId = useRef<string | null>(null)
 
-  // Cleanup function
   useEffect(() => {
     return () => {
       chatStreamService.abortStream()
     }
   }, [])
 
-  // Send message
   const sendMessage = useCallback(
     async (query: string, conversation_id: number, context?: ChatStreamRequest['context']) => {
       if (!query.trim() || chatState.isLoading) return
 
-      // Add user message
       const userMessage: ChatMessage = {
         role: 'user',
         content: query.trim()
@@ -68,7 +66,6 @@ export const useChatStream = () => {
         error: undefined
       }))
 
-      // Clear previous streaming message
       setStreamingMessage(null)
       currentStreamingId.current = null
 
@@ -91,9 +88,8 @@ export const useChatStream = () => {
     [chatState.messages, chatState.isLoading, chatState.sessionId]
   )
 
-  // Handle stream events
   const handleStreamEvent = useCallback((event: StreamEvent) => {
-    console.log('🎯 Handling stream event:', event.type, event)
+    console.log('Handling stream event:', event.type, event)
 
     switch (event.type) {
       case 'session_start':
@@ -107,39 +103,36 @@ export const useChatStream = () => {
         break
 
       case 'thinking':
-      case 'running':
-        console.log('🤔 Handling thinking/running event:', event.type, event.content)
+      case 'running': {
+        const sanitizedThinkingContent = sanitizeAssistantContent(event.content)
         setChatState((prev) => ({
           ...prev,
           currentStage: event.stage,
           progress: event.progress
         }))
 
-        // Update or create a streaming message to show the thinking process
-        // but append instead of overwriting existing content
         setStreamingMessage((prev) => {
           if (prev && prev.stage === event.stage) {
-            // If it's the same stage, update the content
             return {
               ...prev,
-              content: event.content,
-              progress: event.progress,
-              timestamp: event.timestamp
-            }
-          } else {
-            // Create a new thinking message
-            return {
-              id: 'thinking_' + Date.now(),
-              role: 'assistant',
-              content: event.content,
-              isStreaming: true,
-              stage: event.stage,
+              content: sanitizedThinkingContent,
               progress: event.progress,
               timestamp: event.timestamp
             }
           }
+
+          return {
+            id: 'thinking_' + Date.now(),
+            role: 'assistant',
+            content: sanitizedThinkingContent,
+            isStreaming: true,
+            stage: event.stage,
+            progress: event.progress,
+            timestamp: event.timestamp
+          }
         })
         break
+      }
 
       case 'stream_chunk':
         if (!currentStreamingId.current) {
@@ -147,7 +140,7 @@ export const useChatStream = () => {
           setStreamingMessage({
             id: currentStreamingId.current,
             role: 'assistant',
-            content: event.content,
+            content: sanitizeAssistantContent(event.content),
             isStreaming: true,
             stage: event.stage,
             progress: event.progress,
@@ -156,9 +149,10 @@ export const useChatStream = () => {
         } else {
           setStreamingMessage((prev) => {
             if (prev) {
+              const nextContent = sanitizeAssistantContent(prev.content + event.content)
               return {
                 ...prev,
-                content: prev.content + event.content,
+                content: nextContent,
                 progress: event.progress,
                 timestamp: event.timestamp
               }
@@ -170,15 +164,16 @@ export const useChatStream = () => {
 
       case 'stream_complete':
         setStreamingMessage((prev) => {
-          if (prev && prev.content.trim()) {
+          const finalContent = sanitizeAssistantContent(prev?.content)
+          if (prev && finalContent.trim()) {
             const finalMessage: ChatMessage = {
               role: 'assistant',
-              content: prev.content
+              content: finalContent
             }
 
-            setChatState((chatState) => ({
-              ...chatState,
-              messages: [...chatState.messages, finalMessage],
+            setChatState((currentState) => ({
+              ...currentState,
+              messages: [...currentState.messages, finalMessage],
               isLoading: false,
               currentStage: 'completed',
               progress: 1.0
@@ -187,9 +182,9 @@ export const useChatStream = () => {
             currentStreamingId.current = null
             return null
           }
-          // No streaming message - just update state
-          setChatState((chatState) => ({
-            ...chatState,
+
+          setChatState((currentState) => ({
+            ...currentState,
             isLoading: false,
             currentStage: 'completed',
             progress: 1.0
@@ -198,12 +193,12 @@ export const useChatStream = () => {
         })
         break
 
-      case 'completed':
-        // Completed (non-streaming mode) - use content from event directly
-        if (event.content && event.content.trim()) {
+      case 'completed': {
+        const completedContent = sanitizeAssistantContent(event.content)
+        if (completedContent.trim()) {
           const finalMessage: ChatMessage = {
             role: 'assistant',
-            content: event.content
+            content: completedContent
           }
 
           setChatState((prev) => ({
@@ -214,7 +209,6 @@ export const useChatStream = () => {
             progress: 1.0
           }))
         } else {
-          // Just update state if no content
           setChatState((prev) => ({
             ...prev,
             isLoading: false,
@@ -225,6 +219,7 @@ export const useChatStream = () => {
         setStreamingMessage(null)
         currentStreamingId.current = null
         break
+      }
 
       case 'fail':
         setChatState((prev) => ({
@@ -246,9 +241,8 @@ export const useChatStream = () => {
     }
   }, [])
 
-  // Handle stream error
   const handleStreamError = useCallback((error: Error) => {
-    console.error('❌ Stream request error:', error)
+    console.error('Stream request error:', error)
 
     let errorMessage = error.message
     if (error.name === 'TypeError' && error.message.includes('fetch')) {
@@ -266,7 +260,6 @@ export const useChatStream = () => {
     currentStreamingId.current = null
   }, [])
 
-  // Handle stream completion
   const handleStreamComplete = useCallback(() => {
     console.log('Stream completed')
     setChatState((prev) => ({
@@ -275,7 +268,6 @@ export const useChatStream = () => {
     }))
   }, [])
 
-  // Clear chat history
   const clearChat = useCallback(() => {
     chatStreamService.abortStream()
     setChatState({
@@ -289,7 +281,6 @@ export const useChatStream = () => {
     currentStreamingId.current = null
   }, [])
 
-  // Stop the current streaming request
   const stopStreaming = useCallback(() => {
     chatStreamService.abortStream()
     setChatState((prev) => ({

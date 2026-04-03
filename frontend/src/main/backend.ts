@@ -5,7 +5,7 @@ import { app, dialog, BrowserWindow } from 'electron'
 import fs from 'fs'
 import path from 'path'
 // import os from 'os'
-import { spawn } from 'child_process'
+import { spawn, execFileSync } from 'child_process'
 import http from 'http'
 import net from 'net'
 import { isPackaged, actuallyDev, serverRunInFrontend, getResourcesPath } from './utils/env'
@@ -145,7 +145,114 @@ async function checkBackendHealth(options: HealthCheckOptions = {}) {
   }
 }
 
-async function findRunningBackendPort(startPort: number = 1733, maxAttempts: number = 20) {
+function getBundledBackendCandidatePaths(): string[] {
+  const executableName = process.platform === 'win32' ? 'main.exe' : 'main'
+
+  let actualResourcesPath = getResourcesPath()
+  logToBackendFile(`Initial resources path: ${actualResourcesPath}`)
+
+  if (__dirname.indexOf('app.asar') !== -1) {
+    const appAsarPath = __dirname.substring(0, __dirname.indexOf('app.asar'))
+    actualResourcesPath = appAsarPath
+    logToBackendFile(`Adjusted resources path from asar: ${actualResourcesPath}`)
+  }
+
+  return [
+    path.join(actualResourcesPath, 'backend', executableName),
+    path.join(actualResourcesPath, 'backend', 'dist', executableName),
+    path.join(actualResourcesPath, 'dist', executableName),
+    path.join(actualResourcesPath, 'app', 'backend', executableName),
+    path.join(actualResourcesPath, 'app', 'backend', 'dist', executableName),
+    path.join(actualResourcesPath, 'Contents', 'Resources', 'backend', executableName),
+    path.join(actualResourcesPath, 'Contents', 'Resources', 'backend', 'dist', executableName),
+    path.join(actualResourcesPath, 'Contents', 'Resources', 'app', 'backend', executableName),
+    path.join(actualResourcesPath, 'Contents', 'Resources', 'app', 'backend', 'dist', executableName),
+    path.join(process.resourcesPath, 'backend', executableName),
+    path.join(process.resourcesPath, 'backend', 'dist', executableName),
+    path.join(process.resourcesPath, 'app', 'backend', executableName),
+    path.join(process.resourcesPath, 'app', 'backend', 'dist', executableName)
+  ]
+}
+
+function resolveBundledBackendPath(): string | null {
+  const possiblePaths = getBundledBackendCandidatePaths()
+  logToBackendFile(`Searching for backend executable in ${possiblePaths.length} locations:`)
+
+  for (const candidatePath of possiblePaths) {
+    logToBackendFile(`  Checking: ${candidatePath}`)
+    if (fs.existsSync(candidatePath)) {
+      const stats = fs.statSync(candidatePath)
+      logToBackendFile(`  ✅ Found! Size: ${stats.size} bytes, Modified: ${stats.mtime}`)
+      logToBackendFile(
+        `  File mode: ${stats.mode.toString(8)} (executable: ${(stats.mode & parseInt('111', 8)) !== 0})`
+      )
+
+      if ((stats.mode & parseInt('111', 8)) === 0) {
+        try {
+          fs.chmodSync(candidatePath, '755')
+          logToBackendFile(`  Made executable: ${candidatePath}`)
+        } catch (chmodError: any) {
+          logToBackendFile(`  Failed to make executable: ${chmodError.message}`)
+        }
+      }
+
+      return candidatePath
+    }
+
+    logToBackendFile(`  ❌ Not found`)
+  }
+
+  return null
+}
+
+function getListeningProcessExecutablePath(port: number): string | null {
+  try {
+    if (process.platform === 'win32') {
+      const script = [
+        `$conn = Get-NetTCPConnection -LocalPort ${port} -State Listen | Select-Object -First 1`,
+        'if ($conn) {',
+        '  (Get-CimInstance Win32_Process -Filter "ProcessId = $($conn.OwningProcess)").ExecutablePath',
+        '}'
+      ].join('; ')
+
+      const output = execFileSync('powershell.exe', ['-NoProfile', '-Command', script], {
+        encoding: 'utf8',
+        windowsHide: true
+      }).trim()
+
+      return output || null
+    }
+
+    const pidOutput = execFileSync('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-Fp'], {
+      encoding: 'utf8'
+    }).trim()
+    const pid = pidOutput
+      .split(/\r?\n/)
+      .find((line) => line.startsWith('p'))
+      ?.slice(1)
+
+    if (!pid) {
+      return null
+    }
+
+    const command = execFileSync('ps', ['-p', pid, '-o', 'command='], { encoding: 'utf8' }).trim()
+    return command || null
+  } catch (error: any) {
+    logToBackendFile(`Failed to resolve backend executable path for port ${port}: ${error.message}`)
+    return null
+  }
+}
+
+function normalizeExecutablePath(targetPath: string): string {
+  const resolvedPath = path.resolve(targetPath)
+  return process.platform === 'win32' ? resolvedPath.toLowerCase() : resolvedPath
+}
+
+async function findRunningBackendPort(
+  startPort: number = 1733,
+  maxAttempts: number = 20,
+  expectedBackendPath?: string | null
+) {
   for (let port = startPort; port < startPort + maxAttempts; port++) {
     const available = await isPortAvailable(port)
     if (available) {
@@ -159,6 +266,24 @@ async function findRunningBackendPort(startPort: number = 1733, maxAttempts: num
         retryDelayMs: 0,
         requestTimeoutMs: 1200
       })
+
+      if (expectedBackendPath) {
+        const runningBackendPath = getListeningProcessExecutablePath(port)
+        if (!runningBackendPath) {
+          logToBackendFile(
+            `Healthy backend found on port ${port}, but its executable path could not be resolved. Skipping reuse.`
+          )
+          continue
+        }
+
+        if (normalizeExecutablePath(runningBackendPath) !== normalizeExecutablePath(expectedBackendPath)) {
+          logToBackendFile(
+            `Healthy backend on port ${port} belongs to a different executable. Existing: ${runningBackendPath}; Expected: ${expectedBackendPath}. Skipping reuse.`
+          )
+          continue
+        }
+      }
+
       logToBackendFile(`Detected healthy backend on existing port ${port}`)
       return {
         port,
@@ -381,7 +506,8 @@ export async function ensureBackendRunning(mainWindow: BrowserWindow) {
     }
 
     // Try to reuse already-running backend first (e.g. after abnormal exit or external startup).
-    const existingBackend = await findRunningBackendPort(1733, 20)
+    const bundledBackendPath = resolveBundledBackendPath()
+    const existingBackend = await findRunningBackendPort(1733, 20, bundledBackendPath)
     if (existingBackend) {
       backendPort = existingBackend.port
       setBackendStatus('running')
@@ -427,68 +553,31 @@ async function startBackendServer(mainWindow: BrowserWindow) {
   }
 
   return new Promise((resolve, reject) => {
+    let startupSettled = false
+
+    const resolveStartup = (result: unknown) => {
+      if (startupSettled) {
+        return
+      }
+      startupSettled = true
+      resolve(result)
+    }
+
+    const rejectStartup = (error: Error) => {
+      if (startupSettled) {
+        return
+      }
+      startupSettled = true
+      reject(error)
+    }
+
     try {
-      const executableName = process.platform === 'win32' ? 'main.exe' : 'main'
-
-      let actualResourcesPath = getResourcesPath()
-      logToBackendFile(`Initial resources path: ${actualResourcesPath}`)
-
-      if (__dirname.indexOf('app.asar') !== -1) {
-        const appAsarPath = __dirname.substring(0, __dirname.indexOf('app.asar'))
-        actualResourcesPath = appAsarPath
-        logToBackendFile(`Adjusted resources path from asar: ${actualResourcesPath}`)
-      }
-
-      // Try multiple possible backend paths
-      const possiblePaths = [
-        path.join(actualResourcesPath, 'backend', executableName),
-        path.join(actualResourcesPath, 'backend', 'dist', executableName),
-        path.join(actualResourcesPath, 'dist', executableName),
-        path.join(actualResourcesPath, 'app', 'backend', executableName),
-        path.join(actualResourcesPath, 'app', 'backend', 'dist', executableName),
-        path.join(actualResourcesPath, 'Contents', 'Resources', 'backend', executableName),
-        path.join(actualResourcesPath, 'Contents', 'Resources', 'backend', 'dist', executableName),
-        path.join(actualResourcesPath, 'Contents', 'Resources', 'app', 'backend', executableName),
-        path.join(actualResourcesPath, 'Contents', 'Resources', 'app', 'backend', 'dist', executableName),
-        path.join(process.resourcesPath, 'backend', executableName),
-        path.join(process.resourcesPath, 'backend', 'dist', executableName),
-        path.join(process.resourcesPath, 'app', 'backend', executableName),
-        path.join(process.resourcesPath, 'app', 'backend', 'dist', executableName)
-      ]
-
-      logToBackendFile(`Searching for backend executable in ${possiblePaths.length} locations:`)
-
-      let backendPath: string | null = null
-      for (const candidatePath of possiblePaths) {
-        logToBackendFile(`  Checking: ${candidatePath}`)
-        if (fs.existsSync(candidatePath)) {
-          const stats = fs.statSync(candidatePath)
-          logToBackendFile(`  ✅ Found! Size: ${stats.size} bytes, Modified: ${stats.mtime}`)
-          logToBackendFile(
-            `  File mode: ${stats.mode.toString(8)} (executable: ${(stats.mode & parseInt('111', 8)) !== 0})`
-          )
-
-          // Make sure it's executable
-          if ((stats.mode & parseInt('111', 8)) === 0) {
-            try {
-              fs.chmodSync(candidatePath, '755')
-              logToBackendFile(`  Made executable: ${candidatePath}`)
-            } catch (chmodError: any) {
-              logToBackendFile(`  Failed to make executable: ${chmodError.message}`)
-            }
-          }
-
-          backendPath = candidatePath
-          break
-        } else {
-          logToBackendFile(`  ❌ Not found`)
-        }
-      }
+      const backendPath = resolveBundledBackendPath()
 
       if (!backendPath) {
-        const error = `Backend executable not found in any of the expected locations:\n${possiblePaths.join('\n')}`
+        const error = `Backend executable not found in any of the expected locations:\n${getBundledBackendCandidatePaths().join('\n')}`
         logToBackendFile(error)
-        reject(new Error(error))
+        rejectStartup(new Error(error))
         return
       }
 
@@ -560,12 +649,12 @@ async function startBackendServer(mainWindow: BrowserWindow) {
               logToBackendFile('Backend health check passed, resolving startup')
               setBackendStatus('running')
               mainWindow.webContents.send(IpcServerPushChannel.PushGetInitCheckData, res)
-              resolve(res)
+              resolveStartup(res)
             })
             .catch((healthError) => {
               logToBackendFile(`Backend health check failed: ${healthError.message}`)
               setBackendStatus('error')
-              reject(healthError)
+              rejectStartup(healthError instanceof Error ? healthError : new Error(String(healthError)))
             })
         }, 500)
       }
@@ -602,45 +691,49 @@ async function startBackendServer(mainWindow: BrowserWindow) {
         setBackendStatus('stopped')
         if (code !== 0 && !healthCheckStarted) {
           setBackendStatus('error')
-          reject(new Error(`Backend process exited with code ${code}`))
+          rejectStartup(new Error(`Backend process exited with code ${code}`))
         }
       })
 
       backendProcess.on('error', (error) => {
         logToBackendFile(`Failed to start backend process: ${error.message}`)
         setBackendStatus('error')
-        reject(error)
+        rejectStartup(error)
       })
 
       // Timeout fallback
       setTimeout(() => {
+        if (startupSettled) {
+          return
+        }
+
         if (backendProcess && backendProcess.exitCode === null && !healthCheckStarted) {
           logToBackendFile('Backend startup timeout, trying health check...')
           checkBackendHealth({
             port: backendPort,
-            maxRetries: 4,
-            retryDelayMs: 500,
+            maxRetries: 20,
+            retryDelayMs: 1000,
             requestTimeoutMs: 2000
           })
             .then((res) => {
               logToBackendFile('Health check passed despite timeout')
               setBackendStatus('running')
               mainWindow.webContents.send(IpcServerPushChannel.PushGetInitCheckData, res)
-              resolve(res)
+              resolveStartup(res)
             })
             .catch((healthError) => {
               logToBackendFile(`Backend health check failed after timeout: ${healthError.message}`)
               setBackendStatus('error')
-              reject(new Error(`Backend startup timeout: ${healthError.message}`))
+              rejectStartup(new Error(`Backend startup timeout: ${healthError.message}`))
             })
         }
-      }, 30000)
+      }, 60000)
 
       logToBackendFile('Backend server started')
     } catch (error) {
       safeLog.error('Failed to start backend server:', error)
       setBackendStatus('error')
-      reject(error)
+      rejectStartup(error instanceof Error ? error : new Error(String(error)))
     }
   })
 }

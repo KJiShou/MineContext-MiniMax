@@ -294,10 +294,12 @@ class ScreenshotProcessor(BaseContextProcessor):
             logger.error(f"Empty VLM response.")
             raise ValueError(f"Empty VLM response.")
         
-        items = raw_resp.get("items", [])
+        items = self._extract_items_from_response(raw_resp, "screenshot_analyze")
         processed_items = []
         for item in items:
-            processed_items.append(self._create_processed_context(item, raw_context))
+            processed_item = self._create_processed_context(item, raw_context)
+            if processed_item is not None:
+                processed_items.append(processed_item)
         return processed_items
 
     async def _merge_contexts(self, processed_items: List[ProcessedContext]) -> List[ProcessedContext]:
@@ -356,9 +358,9 @@ class ScreenshotProcessor(BaseContextProcessor):
             raise ValueError(f"Empty LLM response when merge items for context type: {context_type.value}")
 
         response_data = parse_json_from_response(response)
-        if not isinstance(response_data, dict) or "items" not in response_data:
-            logger.error(f"merge_items_with_llm, Invalid response format: {response_data}")
-            raise ValueError(f"Invalid response format when merge items for context type: {context_type.value}")
+        merge_items = self._extract_items_from_response(
+            response_data, f"merge_items_with_llm:{context_type.value}"
+        )
 
         # Process results and build ProcessedContext objects
         result_contexts = []
@@ -369,9 +371,13 @@ class ScreenshotProcessor(BaseContextProcessor):
         final_context = None
         new_ctxs = {}
         entity_refresh_items = []
-        for result in response_data.get("items", []):
+        entity_payloads_by_id = {}
+        for result in merge_items:
             merge_type = result.get("merge_type")
             data = result.get("data", {})
+            if not isinstance(data, dict):
+                logger.warning(f"Skipping merge result with non-dict data payload: {data}")
+                continue
 
             if merge_type == "merged":
                 merged_ids = result.get("merged_ids", [])
@@ -431,17 +437,24 @@ class ScreenshotProcessor(BaseContextProcessor):
                 if merged_ids[0] in self._processed_cache.get(context_type.value, {}):
                     continue
                 final_context = all_items_map[merged_ids[0]]
+            else:
+                logger.warning(f"Unknown merge type: {merge_type}")
+                continue
+
+            if final_context is None:
+                continue
             new_ctxs[final_context.id] = final_context
             entity_refresh_items.append(final_context)
+            entity_payloads_by_id[final_context.id] = data.get("entities", [])
 
         # Second pass: parallel refresh entities
         entity_tasks = [
-            self._parse_single_context(item, data.get("entities", []))
+            self._parse_single_context(item, entity_payloads_by_id.get(item.id, []))
             for item in entity_refresh_items
         ]
         # Execute all entity refresh tasks in parallel
         entities_results = await asyncio.gather(*entity_tasks, return_exceptions=True)
-        for entities_result in entities_results:
+        for item, entities_result in zip(entity_refresh_items, entities_results):
             if isinstance(entities_result, Exception):
                 logger.error(f"Entity refresh failed for context {item.id}: {entities_result}")
             else:
@@ -532,7 +545,7 @@ class ScreenshotProcessor(BaseContextProcessor):
 
     def _create_processed_context(self, analysis: Dict[str, Any], raw_context: RawContextProperties = None) -> ProcessedContext:
         now = datetime.datetime.now()
-        if not analysis:
+        if not analysis or not isinstance(analysis, dict):
             logger.warning(f"Skipping incomplete item: {analysis}")
             return None
         context_type = None
@@ -578,6 +591,24 @@ class ScreenshotProcessor(BaseContextProcessor):
             ),
         )
         return new_context
+
+    def _extract_items_from_response(self, response_data: Any, operation: str) -> List[Dict[str, Any]]:
+        """Normalize LLM JSON outputs into a list of item dicts."""
+        if isinstance(response_data, list):
+            return [item for item in response_data if isinstance(item, dict)]
+
+        if isinstance(response_data, dict):
+            if "items" in response_data:
+                items = response_data.get("items", [])
+                if isinstance(items, list):
+                    return [item for item in items if isinstance(item, dict)]
+                logger.error(f"{operation}, 'items' is not a list: {items}")
+                raise ValueError(f"Invalid response format for {operation}: 'items' must be a list")
+
+            return [response_data]
+
+        logger.error(f"{operation}, Invalid response format: {response_data}")
+        raise ValueError(f"Invalid response format for {operation}")
 
     def _encode_image_to_base64(self, image_path: str) -> Optional[str]:
         """Encode image file to base64 string."""

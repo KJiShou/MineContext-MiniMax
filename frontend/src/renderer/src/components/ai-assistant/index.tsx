@@ -13,6 +13,7 @@ import { useMemoizedFn, useRequest } from 'ahooks'
 import { conversationService } from '@renderer/services/conversation-service'
 import { getLogger } from '@shared/logger/renderer'
 import { messageService } from '@renderer/services/messages-service'
+import { sanitizeAssistantContent } from '@renderer/utils/chat-content'
 import { AIAssistantHeader } from './header'
 
 const { Text } = Typography
@@ -37,7 +38,7 @@ interface AIAssistantProps {
 // Markdown rendering component
 export const MarkdownContent: React.FC<{ content: string }> = ({ content }) => {
   const htmlContent = useMemo(() => {
-    return md.render(content)
+    return md.render(sanitizeAssistantContent(content))
   }, [content])
 
   return (
@@ -77,7 +78,9 @@ const AIAssistant: FC<AIAssistantProps> = (props) => {
     onSuccess: (msgs) => {
       setChatState((prev) => ({
         ...prev,
-        messages: msgs as any[]
+        messages: (msgs as any[]).map((msg) =>
+          msg.role === 'assistant' ? { ...msg, content: sanitizeAssistantContent(msg.content) } : msg
+        )
       }))
     }
   })

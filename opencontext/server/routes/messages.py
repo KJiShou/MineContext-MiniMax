@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from opencontext.server.middleware.auth import auth_dependency
+from opencontext.server.utils import sanitize_assistant_content
 from opencontext.storage.global_storage import get_storage
 from opencontext.utils.logging_utils import get_logger
 
@@ -269,6 +270,9 @@ async def get_conversation_messages(
 
         # Use get_conversation_messages method
         messages = storage.get_conversation_messages(conversation_id=cid)
+        for message in messages:
+            if message.get("role") == "assistant":
+                message["content"] = sanitize_assistant_content(message.get("content"))
 
         # The response_model=List[ConversationMessage] will handle
         # validating and returning the list directly.

@@ -42,6 +42,12 @@ class ConfigManager:
 
         if not config_path:
             config_path = "config/config.yaml"
+            # Check if running in packaged build - use bundle directory
+            bundle_dir = os.environ.get("CONTEXT_LAB_BUNDLE_DIR")
+            if bundle_dir and not os.path.exists(config_path):
+                bundled_config = os.path.join(bundle_dir, "config", "config.yaml")
+                if os.path.exists(bundled_config):
+                    config_path = bundled_config
         if config_path and os.path.exists(config_path):
             found_config_path = config_path
         else:

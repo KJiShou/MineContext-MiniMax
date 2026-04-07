@@ -48,11 +48,11 @@ from opencontext.monitoring import (
 logger = get_logger(__name__)
 
 # MiniMax tool integration constants
-MINIMAX_CONFIDENCE_THRESHOLD = 0.6
+MINIMAX_CONFIDENCE_THRESHOLD = 0.5
 TOOL_TIMEOUT = 10  # seconds
 IMAGE_CACHE_TTL = 86400  # 24 hours
-MAX_SUMMARY_CHARS = 500
-MAX_DATA_ITEMS = 5
+MAX_SUMMARY_CHARS = 1000
+MAX_DATA_ITEMS = 10
 CACHE_VERSION = "v1"
 MAX_PROMPT_TOTAL_CHARS = 2000
 

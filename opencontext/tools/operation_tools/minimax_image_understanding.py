@@ -115,9 +115,9 @@ class MinimaxImageUnderstandingTool(MiniMaxBaseTool):
         label = data.get("label", "")
 
         if description:
-            # Truncate long descriptions for summary
-            if len(description) > 200:
-                description = description[:200] + "..."
+            # Truncate long descriptions for summary (increased to preserve more context)
+            if len(description) > 1000:
+                description = description[:1000].rsplit(' ', 1)[0] + "..."
             return description
 
         if label:

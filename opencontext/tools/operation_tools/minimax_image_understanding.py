@@ -96,6 +96,7 @@ class MinimaxImageUnderstandingTool(MiniMaxBaseTool):
             "model": "mini-m3.5-10M",
             "prompt": prompt,
             "image_url": image_url,
+            "response_length": 1024,  # Request longer response for more detail
         }
 
         logger.info(f"MiniMax image understanding: {image_url}")
@@ -109,15 +110,13 @@ class MinimaxImageUnderstandingTool(MiniMaxBaseTool):
         """
         Format LLM-friendly summary.
 
-        Returns concise description of image content.
+        Returns detailed description of image content without truncation.
         """
         description = data.get("description", "")
         label = data.get("label", "")
 
         if description:
-            # Truncate long descriptions for summary (increased to preserve more context)
-            if len(description) > 1000:
-                description = description[:1000].rsplit(' ', 1)[0] + "..."
+            # No truncation - return full description
             return description
 
         if label:

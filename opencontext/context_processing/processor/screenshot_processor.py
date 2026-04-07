@@ -48,13 +48,13 @@ from opencontext.monitoring import (
 logger = get_logger(__name__)
 
 # MiniMax tool integration constants
-MINIMAX_CONFIDENCE_THRESHOLD = 0.5
+MINIMAX_CONFIDENCE_THRESHOLD = 0.4
 TOOL_TIMEOUT = 10  # seconds
 IMAGE_CACHE_TTL = 86400  # 24 hours
-MAX_SUMMARY_CHARS = 1000
-MAX_DATA_ITEMS = 10
+MAX_SUMMARY_CHARS = 4000
+MAX_DATA_ITEMS = 20
 CACHE_VERSION = "v1"
-MAX_PROMPT_TOTAL_CHARS = 2000
+MAX_PROMPT_TOTAL_CHARS = 4000
 
 # Global semaphore for MiniMax tool calls (per-process rate limiting)
 GLOBAL_MINIMAX_TOOL_SEMAPHORE = asyncio.Semaphore(5)
@@ -360,7 +360,14 @@ class ScreenshotProcessor(BaseContextProcessor):
                 async with GLOBAL_MINIMAX_TOOL_SEMAPHORE:  # Global concurrency control
                     tool_result = await asyncio.wait_for(
                         tool.execute_async(
-                            prompt="Detailed analysis of this screenshot",
+                            prompt="""Provide a comprehensive analysis of this screenshot including:
+1. What is shown in this screenshot (application, website, document, etc.)
+2. All visible text content
+3. UI elements and layout
+4. Any notable activities or actions being performed
+5. The overall context and purpose of what is displayed
+
+Be as detailed as possible, describing everything you see.""",
                             image_url=f"data:image/png;base64,{base64_image}"
                         ),
                         timeout=TOOL_TIMEOUT

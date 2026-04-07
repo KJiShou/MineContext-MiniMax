@@ -250,7 +250,8 @@ def _setup_logging(config_path: Optional[str]) -> None:
 
     GlobalConfig.get_instance().initialize(config_path)
 
-    setup_logging(GlobalConfig.get_instance().get_config("logging"))
+    logging_config = GlobalConfig.get_instance().get_config("logging") or {}
+    setup_logging(logging_config)
 
 
 def main() -> int:

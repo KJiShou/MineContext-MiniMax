@@ -8,6 +8,7 @@ Web interface routes
 """
 
 import datetime
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -23,9 +24,15 @@ from opencontext.storage.global_storage import get_storage
 
 router = APIRouter(tags=["web"])
 
-project_root = Path(__file__).parent.parent.parent.parent.resolve()
-templates_path = Path(__file__).parent.parent.parent / "web" / "templates"
+# Use environment variable for templates path in packaged build
+_templates_dir = os.environ.get("CONTEXT_LAB_TEMPLATES_DIR")
+if _templates_dir:
+    templates_path = Path(_templates_dir)
+else:
+    templates_path = Path(__file__).parent.parent.parent / "web" / "templates"
 templates = Jinja2Templates(directory=templates_path)
+
+project_root = Path(__file__).parent.parent.parent.parent.resolve()
 
 
 @router.get("/", include_in_schema=False)
@@ -67,14 +74,21 @@ async def read_contexts(
 
     context_types = get_storage().get_available_context_types()
 
+    # Convert to dicts, excluding embedding and metadata which may cause Jinja2 issues
+    contexts_data = []
+    for c in contexts_to_display:
+        model = ProcessedContextModel.from_processed_context(c, project_root)
+        data = model.model_dump()
+        # Remove potentially problematic fields for Jinja2
+        data.pop('embedding', None)
+        data.pop('metadata', None)
+        contexts_data.append(data)
+
     return templates.TemplateResponse(
+        request,
         "contexts.html",
         {
-            "request": request,
-            "contexts": [
-                ProcessedContextModel.from_processed_context(c, project_root)
-                for c in contexts_to_display
-            ],
+            "contexts": contexts_data,
             "page": page,
             "limit": limit,
             "type": type,
@@ -87,12 +101,12 @@ async def read_contexts(
 
 @router.get("/vector_search", response_class=HTMLResponse)
 async def vector_search_page(request: Request):
-    return templates.TemplateResponse("vector_search.html", {"request": request})
+    return templates.TemplateResponse(request, "vector_search.html")
 
 
 @router.get("/debug", response_class=HTMLResponse)
 async def debug_page(request: Request):
-    return templates.TemplateResponse("debug.html", {"request": request})
+    return templates.TemplateResponse(request, "debug.html")
 
 
 @router.get("/chat", response_class=HTMLResponse)
@@ -163,18 +177,18 @@ async def serve_file(file_path: str, _auth: str = auth_dependency):
 @router.get("/monitoring", response_class=HTMLResponse)
 async def monitoring_page(request: Request):
     """Monitoring page"""
-    return templates.TemplateResponse("monitoring.html", {"request": request})
+    return templates.TemplateResponse(request, "monitoring.html")
 
 
 @router.get("/assistant", response_class=HTMLResponse)
 async def assistant_page(request: Request):
     """Intelligent assistant page"""
     return templates.TemplateResponse(
-        "assistant.html", {"request": request, "title": "Intelligent Assistant"}
+        request, "assistant.html", {"title": "Intelligent Assistant"}
     )
 
 
 @router.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request):
     """System settings page"""
-    return templates.TemplateResponse("settings.html", {"request": request, "title": "系统设置"})
+    return templates.TemplateResponse(request, "settings.html", {"title": "系统设置"})

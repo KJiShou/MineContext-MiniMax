@@ -16,8 +16,12 @@ import os
 import queue
 import threading
 import time
+import uuid
 from collections import deque
+from io import BytesIO
 from typing import Any, Dict, List, Optional, Tuple
+
+from PIL import Image
 
 from opencontext.context_processing.processor.base_processor import BaseContextProcessor
 from opencontext.context_processing.processor.entity_processor import (
@@ -43,6 +47,18 @@ from opencontext.monitoring import (
 
 logger = get_logger(__name__)
 
+# MiniMax tool integration constants
+MINIMAX_CONFIDENCE_THRESHOLD = 0.6
+TOOL_TIMEOUT = 10  # seconds
+IMAGE_CACHE_TTL = 86400  # 24 hours
+MAX_SUMMARY_CHARS = 500
+MAX_DATA_ITEMS = 5
+CACHE_VERSION = "v1"
+MAX_PROMPT_TOTAL_CHARS = 2000
+
+# Global semaphore for MiniMax tool calls (per-process rate limiting)
+GLOBAL_MINIMAX_TOOL_SEMAPHORE = asyncio.Semaphore(5)
+
 
 class ScreenshotProcessor(BaseContextProcessor):
     """
@@ -51,7 +67,7 @@ class ScreenshotProcessor(BaseContextProcessor):
     This processor uses a background thread model, placing processing tasks in a queue and executing them in the background.
     """
 
-    def __init__(self):
+    def __init__(self, session_id: str = "default"):
         """
         Initialize ScreenshotProcessor.
         """
@@ -61,6 +77,8 @@ class ScreenshotProcessor(BaseContextProcessor):
         config = get_config("processing.screenshot_processor") or {}
         super().__init__(config)
 
+        # Session ID for per-session UI change detection
+        self._session_id = session_id
 
         self._similarity_hash_threshold = self.config.get("similarity_hash_threshold", 2)
         self._batch_size = self.config.get("batch_size", 10)
@@ -78,10 +96,12 @@ class ScreenshotProcessor(BaseContextProcessor):
         self._processing_task.start()
 
         # State cache
-        self._processed_cache = (
-            {}
-        )
+        self._processed_cache = {}
         self._current_screenshot = deque(maxlen=self._batch_size * 2)
+
+        # MiniMax tool integration state (per-session UI change detection)
+        self._last_image_hash = None
+        self._last_prompt = None
 
     def shutdown(self, graceful: bool = False):
         """Gracefully shut down background processing tasks."""
@@ -145,6 +165,43 @@ class ScreenshotProcessor(BaseContextProcessor):
         self._current_screenshot.append({"phash": new_phash, "id": new_context.object_id})
 
         return False
+
+    # === MiniMax Tool Integration Helper Methods ===
+
+    def _get_image_hash(self, base64_image: str) -> str:
+        """Generate hash for image caching (with resize for performance)."""
+        import imagehash
+        img_data = base64.b64decode(base64_image)
+        img = Image.open(BytesIO(img_data))
+        img.thumbnail((256, 256))  # Resize before hash - performance optimization
+        return str(imagehash.phash(img))
+
+    def _safe_truncate_data(self, data: Any, max_items: int = 5) -> dict:
+        """Structured truncation to avoid raw JSON slicing."""
+        if isinstance(data, list):
+            return {"items": data[:max_items], "total": len(data)}
+        elif isinstance(data, dict):
+            keys = list(data.keys())[:max_items]
+            return {k: data[k] for k in keys}
+        else:
+            return {"value": str(data)[:200]}
+
+    def _safe_truncate_summary(self, summary: str, max_chars: int = 500) -> str:
+        """Safe truncation of summary at word boundary."""
+        if len(summary) <= max_chars:
+            return summary
+        return summary[:max_chars].rsplit(' ', 1)[0] + '...'
+
+    def _structured_log(self, trace_id: str, stage: str, status: str, **kwargs):
+        """Structured logging for ELK/Datadog."""
+        log_data = {
+            "trace_id": trace_id,
+            "stage": stage,
+            "status": status,
+            "session_id": self._session_id,
+            **kwargs
+        }
+        logger.info(log_data)
 
     def process(self, context: RawContextProperties) -> bool:
         """
@@ -235,16 +292,20 @@ class ScreenshotProcessor(BaseContextProcessor):
 
     async def _process_vlm_single(self, raw_context: RawContextProperties) -> List[ProcessedContext]:
         """
-        Process a single screenshot with VLM
+        Production-grade screenshot analysis pipeline with MiniMax tool integration.
+
+        Flow:
+        1. Screenshot capture
+        2. UI change detection (per-session, per-prompt)
+        3. Call minimax_image_understanding (强制)
+        4. 得到 structured result
+        5. 构造 prompt（分段控制大小）
+        6. 调 VLM 做总结
         """
-        prompt_group = get_prompt_group(
-            "processing.extraction.screenshot_analyze"
-        )
-        system_prompt = prompt_group.get("system")
-        user_prompt_template = prompt_group.get("user")
-        if not system_prompt or not user_prompt_template:
-            logger.error("Failed to get complete prompt for screenshot_analyze.")
-            raise ValueError("Missing prompt configuration for screenshot_analyze")
+        trace_id = str(uuid.uuid4())[:8]
+        self._structured_log(trace_id, "start", "begin")
+
+        tool_result = None
 
         # Prepare image data
         image_path = raw_context.content_path
@@ -257,14 +318,10 @@ class ScreenshotProcessor(BaseContextProcessor):
             logger.warning(f"Failed to encode image: {image_path}")
             raise ValueError(f"Failed to encode image: {image_path}")
 
-        content = [
-            {
-                "type": "image_url",
-                "image_url": {
-                    "url": f"data:image/png;base64,{base64_image}",
-                },
-            }
-        ]
+        # === UI Change Detection (per-session + per-prompt) ===
+        prompt_group = get_prompt_group("processing.extraction.screenshot_analyze")
+        system_prompt_template = prompt_group.get("system")
+        user_prompt_template = prompt_group.get("user")
 
         time_now = datetime.datetime.now()
         user_prompt = user_prompt_template.format(
@@ -272,16 +329,102 @@ class ScreenshotProcessor(BaseContextProcessor):
             current_timestamp=int(time_now.timestamp()),
             current_timezone=time_now.tzname(),
         )
-        content.insert(0, {"type": "text", "text": user_prompt})
-        system_prompt = system_prompt.format(
-            context_type_descriptions=get_context_type_descriptions_for_extraction()
-        )
+
+        image_hash = self._get_image_hash(base64_image)
+        cache_key = f"minimax_{CACHE_VERSION}:{image_hash}"
+
+        if (self._last_image_hash == image_hash and
+            self._last_prompt == user_prompt):
+            self._structured_log(trace_id, "ui_change", "skipped",
+                reason="same_screen_same_prompt")
+            return []  # No change, skip processing
+
+        self._last_image_hash = image_hash
+        self._last_prompt = user_prompt
+
+        # === Check cache (only cache tool result, still proceed to VLM) ===
+        from opencontext.tools.cache import get_tool_cache
+        tool_cache = get_tool_cache()
+        cached = tool_cache.get(cache_key, ttl=IMAGE_CACHE_TTL)
+        if cached:
+            self._structured_log(trace_id, "cache", "hit")
+            tool_result = cached
+        else:
+            # === Call MiniMax tool (function-local, stateless + global semaphore) ===
+            try:
+                self._structured_log(trace_id, "tool_call", "start")
+
+                from opencontext.tools.operation_tools.minimax_image_understanding import MinimaxImageUnderstandingTool
+                tool = MinimaxImageUnderstandingTool()  # Function-local, stateless
+
+                async with GLOBAL_MINIMAX_TOOL_SEMAPHORE:  # Global concurrency control
+                    tool_result = await asyncio.wait_for(
+                        tool.execute_async(
+                            prompt="Detailed analysis of this screenshot",
+                            image_url=f"data:image/png;base64,{base64_image}"
+                        ),
+                        timeout=TOOL_TIMEOUT
+                    )
+
+                self._structured_log(trace_id, "tool_call", "success",
+                    confidence=tool_result.confidence if tool_result else None,
+                    cached=False
+                )
+
+                # Cache tool result
+                if tool_result:
+                    tool_cache.set(cache_key, tool_result, ttl=IMAGE_CACHE_TTL)
+
+            except asyncio.TimeoutError:
+                self._structured_log(trace_id, "tool_call", "timeout_error")
+                tool_result = None
+            except Exception as e:
+                self._structured_log(trace_id, "tool_call", "error", error=str(e))
+                tool_result = None
+
+        # === Construct VLM prompt (segmented control) ===
+        if tool_result and tool_result.status == "success" and tool_result.confidence >= MINIMAX_CONFIDENCE_THRESHOLD:
+            safe_summary = self._safe_truncate_summary(tool_result.summary)
+            safe_data = self._safe_truncate_data(tool_result.data)
+
+            system_prompt = system_prompt_template.format(
+                context_type_descriptions=get_context_type_descriptions_for_extraction()
+            )
+
+            # Enhanced prompt with MiniMax tool result
+            enhanced_user_prompt = f"""User request:
+{user_prompt}
+
+Vision analysis (confidence: {tool_result.confidence}):
+{safe_summary}
+
+Structured data:
+{json.dumps(safe_data)}
+
+Now answer the user's request based on the above."""
+
+            self._structured_log(trace_id, "prompt", "enhanced",
+                summary_len=len(safe_summary),
+                data_items=len(safe_data.get("items", [])) if isinstance(safe_data, dict) else 0
+            )
+        else:
+            system_prompt = system_prompt_template.format(
+                context_type_descriptions=get_context_type_descriptions_for_extraction()
+            )
+            enhanced_user_prompt = user_prompt
+            self._structured_log(trace_id, "prompt", "original")
+
+        content = [
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_image}"}},
+            {"type": "text", "text": enhanced_user_prompt}
+        ]
 
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": content},
         ]
 
+        # === Call VLM for summarization ===
         raw_llm_response = ''
         try:
             raw_llm_response = await generate_with_messages_async(messages)
@@ -289,17 +432,21 @@ class ScreenshotProcessor(BaseContextProcessor):
             logger.error(f"Failed to get VLM response. Error: {e}")
             raise ValueError(f"Failed to get VLM response. Error: {e}")
 
+        self._structured_log(trace_id, "vlm_call", "success")
+
         raw_resp = parse_json_from_response(raw_llm_response)
         if not raw_resp:
             logger.error(f"Empty VLM response.")
             raise ValueError(f"Empty VLM response.")
-        
+
         items = self._extract_items_from_response(raw_resp, "screenshot_analyze")
         processed_items = []
         for item in items:
             processed_item = self._create_processed_context(item, raw_context)
             if processed_item is not None:
                 processed_items.append(processed_item)
+
+        self._structured_log(trace_id, "complete", "success", items_count=len(processed_items))
         return processed_items
 
     async def _merge_contexts(self, processed_items: List[ProcessedContext]) -> List[ProcessedContext]:

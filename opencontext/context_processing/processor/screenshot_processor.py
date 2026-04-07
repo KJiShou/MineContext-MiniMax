@@ -360,14 +360,29 @@ class ScreenshotProcessor(BaseContextProcessor):
                 async with GLOBAL_MINIMAX_TOOL_SEMAPHORE:  # Global concurrency control
                     tool_result = await asyncio.wait_for(
                         tool.execute_async(
-                            prompt="""Provide a comprehensive analysis of this screenshot including:
-1. What is shown in this screenshot (application, website, document, etc.)
-2. All visible text content
-3. UI elements and layout
-4. Any notable activities or actions being performed
-5. The overall context and purpose of what is displayed
+                            prompt="""You are a careful observer. Analyze this screenshot and provide ONLY factual observations about what is DIRECTLY VISIBLE.
 
-Be as detailed as possible, describing everything you see.""",
+For each category, describe ONLY what you can actually see - do NOT guess or infer:
+
+1. APPLICATION/WINDOW: What application is this? (e.g., VS Code, Chrome, Finder, Terminal)
+   - If you cannot identify the exact app, describe the visual style and layout
+
+2. VISIBLE TEXT: Copy EXACTLY all text you can read. Do NOT paraphrase or summarize text.
+
+3. UI ELEMENTS: List the visible UI components (buttons, menus, panels, etc.)
+
+4. CONTENT/CODE/DATA: Describe exactly what is displayed (file names, code snippets, data values, etc.)
+
+5. LAYOUT: Describe the spatial arrangement
+
+IMPORTANT RULES:
+- Only describe what you can SEE in the screenshot
+- Do NOT say "user is working on" or "user is creating" or "user is doing"
+- Do NOT infer the user's intent or purpose
+- If something is unclear or off-screen, say "not visible" or "cannot determine"
+- Do NOT make up descriptions of activities or purposes
+
+Be precise and factual. Only describe the visual evidence.""",
                             image_url=f"data:image/png;base64,{base64_image}"
                         ),
                         timeout=TOOL_TIMEOUT

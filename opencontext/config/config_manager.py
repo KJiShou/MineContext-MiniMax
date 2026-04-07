@@ -155,6 +155,16 @@ class ConfigManager:
         user_setting_path = self._config.get("user_setting_path")
         if not user_setting_path:
             return False
+
+        # If path doesn't exist and we're in packaged mode, try alternative locations
+        if not os.path.exists(user_setting_path):
+            bundle_dir = os.environ.get("CONTEXT_LAB_BUNDLE_DIR")
+            if bundle_dir:
+                # Use user's AppData directory for settings when in packaged mode
+                alt_path = os.path.join(os.path.expanduser("~"), "AppData", "Local", "MineContext", "config", "user_setting.yaml")
+                if os.path.exists(alt_path):
+                    user_setting_path = alt_path
+
         if not os.path.exists(user_setting_path):
             logger.info(f"User settings file does not exist, skipping: {user_setting_path}")
             return False
@@ -165,7 +175,7 @@ class ConfigManager:
             if not user_settings:
                 return False
             self._config = self.deep_merge(self._config, user_settings)
-            # logger.info(f"User settings loaded successfully: {user_settings}")
+            logger.info(f"User settings loaded successfully from: {user_setting_path}")
             return True
         except Exception as e:
             logger.error(f"Failed to load user settings: {e}")
@@ -184,6 +194,22 @@ class ConfigManager:
         if not user_setting_path:
             logger.error("user_setting_path not configured")
             return False
+
+        # Resolve CONTEXT_PATH if present in the path
+        if "${CONTEXT_PATH" in user_setting_path:
+            context_path = os.environ.get("CONTEXT_PATH")
+            if not context_path:
+                # When running from packaged app without CONTEXT_PATH set,
+                # try to use the bundle directory's parent as base
+                bundle_dir = os.environ.get("CONTEXT_LAB_BUNDLE_DIR")
+                if bundle_dir:
+                    # Use user's AppData directory for settings
+                    context_path = os.path.join(os.path.expanduser("~"), "AppData", "Local", "MineContext")
+                else:
+                    context_path = "."
+            user_setting_path = user_setting_path.replace("${CONTEXT_PATH:.}", context_path)
+            user_setting_path = user_setting_path.replace("${CONTEXT_PATH}", context_path)
+
         try:
             dir_name = os.path.dirname(user_setting_path)
             if dir_name:

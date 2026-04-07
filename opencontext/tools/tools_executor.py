@@ -30,6 +30,9 @@ class ToolsExecutor:
             ProfileEntityTool.get_name(): ProfileEntityTool(),
             # Operation tools
             WebSearchTool.get_name(): WebSearchTool(),
+            # MiniMax tools
+            MinimaxWebSearchTool.get_name(): MinimaxWebSearchTool(),
+            MinimaxImageUnderstandingTool.get_name(): MinimaxImageUnderstandingTool(),
         }
 
     async def run_async(self, tool_name: str, tool_input: Dict[str, Any]) -> Any:

@@ -1,3 +1,6 @@
+# Copyright (c) 2025 Beijing Volcano Engine Technology Co., Ltd.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 Tool: tool_definitions
 """
@@ -32,8 +35,14 @@ WEB_SEARCH_TOOL_DEFINITION = [
     {"type": "function", "function": WebSearchTool.get_definition()},
 ]
 
+# MiniMax tools
+MINIMAX_TOOL_DEFINITIONS = [
+    {"type": "function", "function": MinimaxWebSearchTool.get_definition()},
+    {"type": "function", "function": MinimaxImageUnderstandingTool.get_definition()},
+]
+
 ALL_RETRIEVAL_TOOL_DEFINITIONS = CONTEXT_RETRIEVAL_TOOLS + DOCUMENT_RETRIEVAL_TOOLS
 
 ALL_TOOL_DEFINITIONS = (
-    ALL_RETRIEVAL_TOOL_DEFINITIONS + ALL_PROFILE_TOOL_DEFINITIONS + WEB_SEARCH_TOOL_DEFINITION
+    ALL_RETRIEVAL_TOOL_DEFINITIONS + ALL_PROFILE_TOOL_DEFINITIONS + WEB_SEARCH_TOOL_DEFINITION + MINIMAX_TOOL_DEFINITIONS
 )

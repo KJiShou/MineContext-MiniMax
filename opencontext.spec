@@ -84,8 +84,11 @@ a = Analysis(
         ('opencontext/web/templates', 'opencontext/web/templates')
     ],
     hiddenimports=[
-        'uvicorn.protocols.http.auto',
-        'uvicorn.protocols.websockets.auto',
+        'uvicorn',
+        'uvicorn.protocols.http',
+        'uvicorn.protocols.websockets',
+        'uvicorn.extensions',
+        'uvicorn.middleware',
         'chromadb.telemetry.product.posthog',
         'chromadb.api.rust',
         'chromadb.db.impl.sqlite',
@@ -96,13 +99,13 @@ a = Analysis(
         'sqlite3',
         '_ssl',
         '_hashlib',
+        'encodings',
+        'codecs',
     ],
     hookspath=['.'],
     hooksconfig={},
     runtime_hooks=['hook-opencontext.py'],
     excludes=[],
-    noarchive=True,
-    optimize=1,
 )
 pyz = PYZ(a.pure)
 

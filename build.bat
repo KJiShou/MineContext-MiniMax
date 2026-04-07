@@ -75,7 +75,8 @@ if exist build rmdir /s /q build
 REM 5. Run PyInstaller build
 echo --^> Starting application build with PyInstaller...
 if "!USE_UV!"=="true" (
-    uv run pyinstaller --clean --noconfirm --log-level INFO opencontext.spec
+    REM Use "uv run python -m PyInstaller" to ensure PyInstaller runs in uv's Python environment
+    uv run python -m PyInstaller --clean --noconfirm --log-level INFO opencontext.spec
 ) else (
     pyinstaller --clean --noconfirm --log-level INFO opencontext.spec
 )
@@ -105,8 +106,8 @@ if not "!BUILT_EXECUTABLE!"=="" (
 
     REM Copy config directory
     if exist "config" (
-        echo --^> Copying 'config' directory to 'dist\'...
-        xcopy /E /I /Y config dist\config >nul
+        echo --^> Copying 'config' directory to 'dist\main\'...
+        xcopy /E /I /Y config dist\main\config >nul
         echo Config directory copied.
         echo.
     ) else (

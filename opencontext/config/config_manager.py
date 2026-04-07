@@ -164,6 +164,18 @@ class ConfigManager:
                 alt_path = os.path.join(os.path.expanduser("~"), "AppData", "Local", "MineContext", "config", "user_setting.yaml")
                 if os.path.exists(alt_path):
                     user_setting_path = alt_path
+            # Also try resolving CONTEXT_PATH if present
+            if "${CONTEXT_PATH" in user_setting_path:
+                import re
+                context_path = os.environ.get("CONTEXT_PATH")
+                if not context_path:
+                    bundle_dir = os.environ.get("CONTEXT_LAB_BUNDLE_DIR")
+                    if bundle_dir:
+                        context_path = os.path.join(os.path.expanduser("~"), "AppData", "Local", "MineContext")
+                    else:
+                        context_path = "."
+                user_setting_path = re.sub(r'\$\{CONTEXT_PATH:[^}]*\}', context_path, user_setting_path)
+                user_setting_path = re.sub(r'\$\{CONTEXT_PATH\}', context_path, user_setting_path)
 
         if not os.path.exists(user_setting_path):
             logger.info(f"User settings file does not exist, skipping: {user_setting_path}")
@@ -196,6 +208,7 @@ class ConfigManager:
             return False
 
         # Resolve CONTEXT_PATH if present in the path
+        # Handle ${CONTEXT_PATH:.} format (with default value)
         if "${CONTEXT_PATH" in user_setting_path:
             context_path = os.environ.get("CONTEXT_PATH")
             if not context_path:
@@ -207,8 +220,10 @@ class ConfigManager:
                     context_path = os.path.join(os.path.expanduser("~"), "AppData", "Local", "MineContext")
                 else:
                     context_path = "."
-            user_setting_path = user_setting_path.replace("${CONTEXT_PATH:.}", context_path)
-            user_setting_path = user_setting_path.replace("${CONTEXT_PATH}", context_path)
+            # Handle both ${CONTEXT_PATH} and ${CONTEXT_PATH:default} formats
+            import re
+            user_setting_path = re.sub(r'\$\{CONTEXT_PATH:[^}]*\}', context_path, user_setting_path)
+            user_setting_path = re.sub(r'\$\{CONTEXT_PATH\}', context_path, user_setting_path)
 
         try:
             dir_name = os.path.dirname(user_setting_path)

@@ -61,7 +61,7 @@ class ComponentInitializer:
             self.config_manager.get_config()
             if self.config_manager
             else GlobalConfig.get_instance().get_config()
-        )
+        ) or {}
         self.global_config = GlobalConfig.get_instance()
 
     def _to_camel_case(self, name: str) -> str:

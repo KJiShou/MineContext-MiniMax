@@ -221,7 +221,7 @@ def handle_start(args: argparse.Namespace) -> int:
 
     from opencontext.config.global_config import get_config
 
-    web_config = get_config("web")
+    web_config = get_config("web") or {}
     if web_config.get("enabled", True):
         # Command line arguments override config file
         host = args.host if args.host else web_config.get("host", "localhost")

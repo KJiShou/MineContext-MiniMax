@@ -1,12 +1,12 @@
 <div align="center">
 
 <picture>
-  <img alt="MineContext" src="src/MineContext-Banner.svg" width="100%" height="auto">
+  <img alt="MineContext-MiniMax" src="src/MineContext-Banner.svg" width="100%" height="auto">
 </picture>
 
-### MineContext: Create with Context, Clarity from Chaos
+### MineContext-MiniMax: Create with Context, Clarity from Chaos
 
-An open-source, proactive context-aware AI partner, dedicated to bringing clarity and efficiency to your work, study and creation.
+An open-source, proactive context-aware AI partner powered by MiniMax, dedicated to bringing clarity and efficiency to your work, study and creation. Enhanced with MiniMax web search and image understanding capabilities.
 
 [中文](README_zh.md) / English
 
@@ -32,7 +32,7 @@ An open-source, proactive context-aware AI partner, dedicated to bringing clarit
 
 Table of Contents
 
-- [👋🏻 What is MineContext](#-what-is-minecontext)
+- [👋🏻 What is MineContext-MiniMax](#-what-is-minecontext-minimax)
 - [🚀 Key Features](#-key-features)
 - [🔏 Privacy Protection](#-privacy-protection)
   - [Local-First](#local-first)
@@ -76,15 +76,15 @@ Table of Contents
 
 <br>
 
-# 👋🏻 What is MineContext
+# 👋🏻 What is MineContext-MiniMax
 
-MineContext is a proactive context-aware AI partner. By utilizing screenshots and content comprehension (with future support for multi-source multimodal information including documents, images, videos, code, and external application data), it can see and understand the user's digital world context. Based on an underlying contextual engineering framework, it actively delivers high-quality information such as insights, daily/weekly summaries, to-do lists, and activity records.
+MineContext-MiniMax is a proactive context-aware AI partner powered by MiniMax. By utilizing screenshots and content comprehension with MiniMax's native web search and image understanding tools (along with support for multi-source multimodal information including documents, images, videos, code, and external application data), it can see and understand the user's digital world context. Based on an underlying contextual engineering framework, it actively delivers high-quality information such as insights, daily/weekly summaries, to-do lists, and activity records.
 
 ![feature.gif](src/feature.gif)
 
 # 🚀 Key Features
 
-MineContext focuses on four key features: effortless collection, intelligent resurfacing, proactive delivery, and a context engineering architecture.
+MineContext-MiniMax focuses on five key features: effortless collection, intelligent resurfacing, proactive delivery, MiniMax-powered tools, and a context engineering architecture.
 
 1. 📥 Effortless Collection
    Capable of gathering and processing massive amounts of context. Designed storage management enables extensive collection without adding mental burden.
@@ -92,7 +92,9 @@ MineContext focuses on four key features: effortless collection, intelligent res
    Delivers key information and insights proactively in daily use. It extracts summarized content from your context—such as daily/weekly summaries, tips, and todos—and pushes them directly to your homepage.
 3. 💡 Intelligent Resurfacing
    Surfaces relevant and useful context intelligently during creation. Ensures assisted creativity without overwhelming you with information.
-4. 🎯 Context Engineering Architecture
+4. 🔍 MiniMax-Powered Intelligence
+   Enhanced with MiniMax's native web search and image understanding tools for deeper context analysis and richer insights.
+5. 🎯 Context Engineering Architecture
    Supports the complete lifecycle of multimodal, multi-source data—from capture, processing, and storage to management, retrieval, and consumption—enabling the generation of six types of intelligent context.
 
 # 🔏 Privacy Protection
@@ -125,9 +127,10 @@ After the application launches, please follow the prompts to enter your API key.
 
 We currently support services from Doubao, OpenAI, MiniMax, and custom models. This includes any **local models** or **third-party model** services that are compatible with the OpenAI API format.
 
-We recommend using [LMStudio](https://lmstudio.ai/) to run local models. It provides a simple interface and powerful features to help you quickly deploy and manage them.
+**This fork uses MiniMax as the primary chat model with Gemini for embedding.** MiniMax provides enhanced web search and image understanding capabilities through its native tools.
 
-**Considering both cost and performance, we recommend using the Doubao model.** The Doubao API Key can be generated in the [API Management Interface](https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey).
+**Original Configuration (Doubao):**
+The Doubao API Key can be generated in the [API Management Interface](https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey).
 
 After obtaining the Doubao API Key, you need to activate two models in the [Model Activation Management Interface](https://console.volcengine.com/ark/region:ark+cn-beijing/model): the Visual Language Model and the Embedding Model.
 

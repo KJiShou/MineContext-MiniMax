@@ -25,6 +25,7 @@ from opencontext.context_processing.processor.screenshot_processor import (
     MAX_SUMMARY_CHARS,
     MAX_DATA_ITEMS,
     CACHE_VERSION,
+    _get_global_minimax_tool_semaphore,
 )
 from opencontext.models.context import RawContextProperties
 from opencontext.models.enums import ContentFormat, ContextSource
@@ -254,6 +255,11 @@ class TestConstants:
         """Test cache TTL is positive (in seconds)."""
         assert IMAGE_CACHE_TTL > 0
 
+    def test_minimax_tool_semaphore_is_scoped_per_event_loop(self):
+        first = asyncio.run(_get_semaphore_identity())
+        second = asyncio.run(_get_semaphore_identity())
+        assert first != second
+
 
 class TestCacheKeyFormat:
     """Tests for cache key generation."""
@@ -482,3 +488,7 @@ class TestMiniMaxPromptIntegration:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+async def _get_semaphore_identity():
+    return id(_get_global_minimax_tool_semaphore())

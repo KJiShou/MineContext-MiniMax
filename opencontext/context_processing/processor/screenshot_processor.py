@@ -17,6 +17,7 @@ import queue
 import threading
 import time
 import uuid
+import weakref
 from collections import deque
 from io import BytesIO
 from typing import Any, Dict, List, Optional, Tuple
@@ -49,15 +50,29 @@ logger = get_logger(__name__)
 
 # MiniMax tool integration constants
 MINIMAX_CONFIDENCE_THRESHOLD = 0.4
-TOOL_TIMEOUT = 45  # seconds
+TOOL_TIMEOUT = 60  # seconds
 IMAGE_CACHE_TTL = 86400  # 24 hours
 MAX_SUMMARY_CHARS = 4000
 MAX_DATA_ITEMS = 20
 CACHE_VERSION = "v1"
 MAX_PROMPT_TOTAL_CHARS = 4000
 
-# Global semaphore for MiniMax tool calls (per-process rate limiting)
-GLOBAL_MINIMAX_TOOL_SEMAPHORE = asyncio.Semaphore(5)
+_MINIMAX_TOOL_SEMAPHORE_LIMIT = 3
+_MINIMAX_TOOL_SEMAPHORES: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore]" = (
+    weakref.WeakKeyDictionary()
+)
+_MINIMAX_TOOL_SEMAPHORES_LOCK = threading.Lock()
+
+
+def _get_global_minimax_tool_semaphore() -> asyncio.Semaphore:
+    """Return an event-loop-local semaphore for MiniMax tool concurrency control."""
+    loop = asyncio.get_running_loop()
+    with _MINIMAX_TOOL_SEMAPHORES_LOCK:
+        semaphore = _MINIMAX_TOOL_SEMAPHORES.get(loop)
+        if semaphore is None:
+            semaphore = asyncio.Semaphore(_MINIMAX_TOOL_SEMAPHORE_LIMIT)
+            _MINIMAX_TOOL_SEMAPHORES[loop] = semaphore
+        return semaphore
 
 
 class ScreenshotProcessor(BaseContextProcessor):
@@ -409,7 +424,8 @@ class ScreenshotProcessor(BaseContextProcessor):
                 from opencontext.tools.operation_tools.minimax_image_understanding import MinimaxImageUnderstandingTool
                 tool = MinimaxImageUnderstandingTool()  # Function-local, stateless
 
-                async with GLOBAL_MINIMAX_TOOL_SEMAPHORE:  # Global concurrency control
+                async with _get_global_minimax_tool_semaphore():  # Per-event-loop concurrency control
+                    self._structured_log(trace_id, "tool_call", "acquired_slot")
                     tool_result = await asyncio.wait_for(
                         tool.execute_async(
                             prompt="""You are a careful observer. Analyze this screenshot and provide ONLY factual observations about what is DIRECTLY VISIBLE.
@@ -438,7 +454,7 @@ Be precise and factual. Only describe the visual evidence.""",
                             image_url=image_path,
                             timeout_seconds=TOOL_TIMEOUT,
                         ),
-                        timeout=TOOL_TIMEOUT
+                        timeout=TOOL_TIMEOUT,
                     )
 
                 self._structured_log(trace_id, "tool_call", "success",

@@ -10,11 +10,10 @@ Provides common functionality for web search and image understanding.
 """
 
 import os
+import re
 import time
 from abc import abstractmethod
 from typing import Any, Dict, Optional
-
-import httpx
 
 from opencontext.config.global_config import get_config
 from opencontext.tools.base import BaseTool
@@ -45,13 +44,35 @@ class MiniMaxBaseTool(BaseTool):
     def __init__(self):
         super().__init__()
         self._config = get_config("tools.minimax") or {}
-        self._api_key = os.environ.get("MINIMAX_API_KEY") or self._config.get("api_key", "")
-        self._base_url = os.environ.get("MINIMAX_API_HOST") or self._config.get(
-            "base_url", "https://api.minimax.io"
-        )
+        self._api_key, self._base_url = self._resolve_minimax_credentials()
         self._cache = get_tool_cache()
         self._rate_limiter = get_rate_limiter()
         self._metrics = get_metrics_collector()
+
+    @classmethod
+    def _normalize_base_url(cls, base_url: str) -> str:
+        """Normalize MiniMax API hosts to the root API domain."""
+        normalized = (base_url or "https://api.minimax.io").strip().rstrip("/")
+        return re.sub(r"/v1$", "", normalized)
+
+    @classmethod
+    def _resolve_minimax_credentials(cls) -> tuple[str, str]:
+        """Resolve MiniMax credentials using env -> tools.minimax -> vlm_model."""
+        tool_config = get_config("tools.minimax") or {}
+        vlm_config = get_config("vlm_model") or {}
+
+        api_key = (
+            os.environ.get("MINIMAX_API_KEY")
+            or tool_config.get("api_key", "")
+            or vlm_config.get("api_key", "")
+        )
+        base_url = (
+            os.environ.get("MINIMAX_API_HOST")
+            or tool_config.get("base_url", "")
+            or vlm_config.get("base_url", "")
+            or "https://api.minimax.io"
+        )
+        return api_key, cls._normalize_base_url(base_url)
 
     @abstractmethod
     def get_type(self) -> str:

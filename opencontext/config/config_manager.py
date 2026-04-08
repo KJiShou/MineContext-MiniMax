@@ -70,6 +70,35 @@ class ConfigManager:
         for key, value in os.environ.items():
             self._env_vars[key] = value
 
+    def _get_runtime_context_base(self) -> str:
+        """Resolve the runtime base directory for writable user data."""
+        context_path = os.environ.get("CONTEXT_PATH")
+        if context_path:
+            return context_path
+
+        bundle_dir = os.environ.get("CONTEXT_LAB_BUNDLE_DIR")
+        if bundle_dir:
+            return os.path.join(os.path.expanduser("~"), "AppData", "Local", "MineContext")
+
+        return "."
+
+    def _resolve_user_setting_path(self, user_setting_path: Optional[str]) -> Optional[str]:
+        """Resolve the user settings path consistently across dev and packaged builds."""
+        if not user_setting_path:
+            return user_setting_path
+
+        resolved_path = user_setting_path
+        if "${CONTEXT_PATH" in resolved_path:
+            context_base = self._get_runtime_context_base()
+            resolved_path = re.sub(r"\$\{CONTEXT_PATH:[^}]*\}", context_base, resolved_path)
+            resolved_path = re.sub(r"\$\{CONTEXT_PATH\}", context_base, resolved_path)
+        elif os.environ.get("CONTEXT_LAB_BUNDLE_DIR") and not os.environ.get("CONTEXT_PATH"):
+            if not os.path.isabs(resolved_path):
+                relative_path = resolved_path.lstrip(".\\/") or resolved_path
+                resolved_path = os.path.join(self._get_runtime_context_base(), relative_path)
+
+        return os.path.normpath(resolved_path)
+
     def _replace_env_vars(self, config_data: Any) -> Any:
         """
         Replace environment variable references in the configuration
@@ -152,30 +181,9 @@ class ConfigManager:
         """
         if not self._config:
             return False
-        user_setting_path = self._config.get("user_setting_path")
+        user_setting_path = self._resolve_user_setting_path(self._config.get("user_setting_path"))
         if not user_setting_path:
             return False
-
-        # If path doesn't exist and we're in packaged mode, try alternative locations
-        if not os.path.exists(user_setting_path):
-            bundle_dir = os.environ.get("CONTEXT_LAB_BUNDLE_DIR")
-            if bundle_dir:
-                # Use user's AppData directory for settings when in packaged mode
-                alt_path = os.path.join(os.path.expanduser("~"), "AppData", "Local", "MineContext", "config", "user_setting.yaml")
-                if os.path.exists(alt_path):
-                    user_setting_path = alt_path
-            # Also try resolving CONTEXT_PATH if present
-            if "${CONTEXT_PATH" in user_setting_path:
-                import re
-                context_path = os.environ.get("CONTEXT_PATH")
-                if not context_path:
-                    bundle_dir = os.environ.get("CONTEXT_LAB_BUNDLE_DIR")
-                    if bundle_dir:
-                        context_path = os.path.join(os.path.expanduser("~"), "AppData", "Local", "MineContext")
-                    else:
-                        context_path = "."
-                user_setting_path = re.sub(r'\$\{CONTEXT_PATH:[^}]*\}', context_path, user_setting_path)
-                user_setting_path = re.sub(r'\$\{CONTEXT_PATH\}', context_path, user_setting_path)
 
         if not os.path.exists(user_setting_path):
             logger.info(f"User settings file does not exist, skipping: {user_setting_path}")
@@ -202,28 +210,10 @@ class ConfigManager:
             return False
 
         # Get user settings path
-        user_setting_path = self._config.get("user_setting_path")
+        user_setting_path = self._resolve_user_setting_path(self._config.get("user_setting_path"))
         if not user_setting_path:
             logger.error("user_setting_path not configured")
             return False
-
-        # Resolve CONTEXT_PATH if present in the path
-        # Handle ${CONTEXT_PATH:.} format (with default value)
-        if "${CONTEXT_PATH" in user_setting_path:
-            context_path = os.environ.get("CONTEXT_PATH")
-            if not context_path:
-                # When running from packaged app without CONTEXT_PATH set,
-                # try to use the bundle directory's parent as base
-                bundle_dir = os.environ.get("CONTEXT_LAB_BUNDLE_DIR")
-                if bundle_dir:
-                    # Use user's AppData directory for settings
-                    context_path = os.path.join(os.path.expanduser("~"), "AppData", "Local", "MineContext")
-                else:
-                    context_path = "."
-            # Handle both ${CONTEXT_PATH} and ${CONTEXT_PATH:default} formats
-            import re
-            user_setting_path = re.sub(r'\$\{CONTEXT_PATH:[^}]*\}', context_path, user_setting_path)
-            user_setting_path = re.sub(r'\$\{CONTEXT_PATH\}', context_path, user_setting_path)
 
         try:
             dir_name = os.path.dirname(user_setting_path)
@@ -253,6 +243,8 @@ class ConfigManager:
                 user_settings["logging"] = settings["logging"]
             if "prompts" in settings:
                 user_settings["prompts"] = settings["prompts"]
+            if "tools" in settings:
+                user_settings["tools"] = settings["tools"]
 
             # Save to file
             with open(user_setting_path, "w", encoding="utf-8") as f:
@@ -277,7 +269,7 @@ class ConfigManager:
             logger.error("Main configuration not loaded")
             return False
 
-        user_setting_path = self._config.get("user_setting_path")
+        user_setting_path = self._resolve_user_setting_path(self._config.get("user_setting_path"))
         if not user_setting_path:
             logger.error("user_setting_path not configured")
             return False

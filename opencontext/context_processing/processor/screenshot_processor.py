@@ -383,7 +383,7 @@ IMPORTANT RULES:
 - Do NOT make up descriptions of activities or purposes
 
 Be precise and factual. Only describe the visual evidence.""",
-                            image_url=f"data:image/png;base64,{base64_image}"
+                            image_url=image_path
                         ),
                         timeout=TOOL_TIMEOUT
                     )

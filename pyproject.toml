@@ -45,6 +45,7 @@ dependencies = [
     "playwright",
     "volcengine-python-sdk[ark]",
     "httpx",
+    "minimax-coding-plan-mcp>=0.0.4",
 ]
 
 [project.optional-dependencies]

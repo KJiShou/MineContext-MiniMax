@@ -10,7 +10,9 @@ Prevents hitting rate limits while maximizing throughput.
 """
 
 import asyncio
+import inspect
 import time
+from contextlib import asynccontextmanager
 from typing import Optional
 
 from opencontext.utils.logging_utils import get_logger
@@ -40,6 +42,7 @@ class RateLimiter:
         self._rate_limit_hits = 0
         self._concurrent_hits = 0
 
+    @asynccontextmanager
     async def acquire(self):
         """
         Acquire rate limit permission.
@@ -78,7 +81,10 @@ class RateLimiter:
         for attempt in range(self._max_retries):
             try:
                 async with self.acquire():
-                    return await coro
+                    awaitable = coro() if callable(coro) else coro
+                    if not inspect.isawaitable(awaitable):
+                        raise TypeError("RateLimiter expected an awaitable or coroutine factory")
+                    return await awaitable
             except RateLimitError as e:
                 last_error = e
                 self._rate_limit_hits += 1

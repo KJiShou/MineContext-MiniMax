@@ -9,7 +9,12 @@ Unit tests for ScreenshotProcessor MiniMax tool integration.
 Tests helper methods and UI change detection.
 """
 
+import asyncio
+import datetime
 import json
+from unittest.mock import AsyncMock, patch
+
+from PIL import Image
 import pytest
 
 from opencontext.context_processing.processor.screenshot_processor import (
@@ -21,6 +26,10 @@ from opencontext.context_processing.processor.screenshot_processor import (
     MAX_DATA_ITEMS,
     CACHE_VERSION,
 )
+from opencontext.models.context import RawContextProperties
+from opencontext.models.enums import ContentFormat, ContextSource
+from opencontext.tools.cache import get_tool_cache
+from opencontext.tools.tool_response import ToolResponse, ToolType
 
 
 class TestSafeTruncateData:
@@ -253,6 +262,114 @@ class TestCacheKeyFormat:
         """Test that cache key format includes version."""
         expected_prefix = f"minimax_{CACHE_VERSION}:"
         assert expected_prefix == "minimax_v1:"
+
+
+def _create_test_image(tmp_path) -> str:
+    image_path = tmp_path / "screenshot.png"
+    Image.new("RGB", (32, 32), color=(255, 255, 255)).save(image_path)
+    return str(image_path)
+
+
+def _create_raw_context(image_path: str) -> RawContextProperties:
+    return RawContextProperties(
+        content_format=ContentFormat.IMAGE,
+        source=ContextSource.SCREENSHOT,
+        create_time=datetime.datetime.now(),
+        content_path=image_path,
+    )
+
+
+class TestMiniMaxPromptIntegration:
+    """Tests MiniMax MCP prompt enhancement and fallback behavior."""
+
+    def test_successful_minimax_result_enhances_prompt_and_uses_local_image_path(self, tmp_path):
+        processor = ScreenshotProcessor(session_id="enhanced_prompt")
+        get_tool_cache().clear()
+        image_path = _create_test_image(tmp_path)
+        raw_context = _create_raw_context(image_path)
+        captured_messages = {}
+        mock_execute = AsyncMock(
+            return_value=ToolResponse.success(
+                tool_type=ToolType.IMAGE_UNDERSTANDING.value,
+                data={"content": "Visible editor, file tree, and a code pane."},
+                confidence=0.92,
+                summary="Visible editor, file tree, and a code pane.",
+            )
+        )
+
+        async def fake_generate(messages, *args, **kwargs):
+            captured_messages["messages"] = messages
+            return '{"ok": true}'
+
+        try:
+            with patch(
+                "opencontext.context_processing.processor.screenshot_processor.get_prompt_group",
+                return_value={
+                    "system": "SYS {context_type_descriptions}",
+                    "user": "USER {current_date} {current_timestamp} {current_timezone}",
+                },
+            ), patch(
+                "opencontext.tools.operation_tools.minimax_image_understanding.MinimaxImageUnderstandingTool.execute_async",
+                new=mock_execute,
+            ), patch(
+                "opencontext.context_processing.processor.screenshot_processor.generate_with_messages_async",
+                side_effect=fake_generate,
+            ), patch.object(
+                processor, "_extract_items_from_response", return_value=[]
+            ):
+                result = asyncio.run(processor._process_vlm_single(raw_context))
+        finally:
+            processor.shutdown()
+
+        assert result == []
+        assert mock_execute.await_count == 1
+        assert mock_execute.await_args.kwargs["image_url"] == image_path
+
+        prompt_text = captured_messages["messages"][1]["content"][1]["text"]
+        assert "Vision analysis" in prompt_text
+        assert "Visible editor, file tree, and a code pane." in prompt_text
+
+    def test_failed_minimax_result_falls_back_to_original_prompt(self, tmp_path):
+        processor = ScreenshotProcessor(session_id="fallback_prompt")
+        get_tool_cache().clear()
+        image_path = _create_test_image(tmp_path)
+        raw_context = _create_raw_context(image_path)
+        captured_messages = {}
+        mock_execute = AsyncMock(
+            return_value=ToolResponse.error(
+                tool_type=ToolType.IMAGE_UNDERSTANDING.value,
+                error_message="mcp unavailable",
+            )
+        )
+
+        async def fake_generate(messages, *args, **kwargs):
+            captured_messages["messages"] = messages
+            return '{"ok": true}'
+
+        try:
+            with patch(
+                "opencontext.context_processing.processor.screenshot_processor.get_prompt_group",
+                return_value={
+                    "system": "SYS {context_type_descriptions}",
+                    "user": "USER {current_date} {current_timestamp} {current_timezone}",
+                },
+            ), patch(
+                "opencontext.tools.operation_tools.minimax_image_understanding.MinimaxImageUnderstandingTool.execute_async",
+                new=mock_execute,
+            ), patch(
+                "opencontext.context_processing.processor.screenshot_processor.generate_with_messages_async",
+                side_effect=fake_generate,
+            ), patch.object(
+                processor, "_extract_items_from_response", return_value=[]
+            ):
+                result = asyncio.run(processor._process_vlm_single(raw_context))
+        finally:
+            processor.shutdown()
+
+        assert result == []
+        prompt_text = captured_messages["messages"][1]["content"][1]["text"]
+        assert "Vision analysis" not in prompt_text
+        assert prompt_text.startswith("USER ")
 
 
 if __name__ == "__main__":

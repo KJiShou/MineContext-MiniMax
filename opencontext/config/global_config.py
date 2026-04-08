@@ -76,8 +76,8 @@ class GlobalConfig:
             return
 
         try:
-            # Try to load the configuration automatically
-            self._initialized = self.initialize("config/config.yaml")
+            # Let ConfigManager resolve bundled config paths in packaged builds.
+            self._initialized = self.initialize()
             if not self._initialized:
                 logger.error(
                     "GlobalConfig auto-initialization: no config file found, using defaults"

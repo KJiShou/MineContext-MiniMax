@@ -38,7 +38,7 @@ from opencontext.tools.tool_definitions import ALL_TOOL_DEFINITIONS
 from opencontext.utils.image import calculate_phash, resize_image
 from opencontext.utils.json_parser import parse_json_from_response
 from opencontext.utils.logging_utils import get_logger
-from opencontext.config.global_config import get_prompt_group
+from opencontext.config.global_config import get_config, get_prompt_group
 from opencontext.monitoring import (
     increment_data_count,
     increment_recording_stat,
@@ -49,7 +49,7 @@ logger = get_logger(__name__)
 
 # MiniMax tool integration constants
 MINIMAX_CONFIDENCE_THRESHOLD = 0.4
-TOOL_TIMEOUT = 10  # seconds
+TOOL_TIMEOUT = 45  # seconds
 IMAGE_CACHE_TTL = 86400  # 24 hours
 MAX_SUMMARY_CHARS = 4000
 MAX_DATA_ITEMS = 20
@@ -117,6 +117,35 @@ class ScreenshotProcessor(BaseContextProcessor):
     def get_name(self) -> str:
         """Return the processor name."""
         return "screenshot_processor"
+
+    @staticmethod
+    def _require_prompt_template(
+        prompt_group: Optional[Dict[str, Any]], prompt_path: str, field: str
+    ) -> str:
+        """Return a prompt template or raise a diagnostic error when it is missing."""
+        if not isinstance(prompt_group, dict):
+            raise ValueError(f"Prompt group '{prompt_path}' is missing or invalid")
+
+        template = prompt_group.get(field)
+        if not isinstance(template, str) or not template.strip():
+            raise ValueError(
+                f"Prompt field '{field}' is missing or empty in prompt group '{prompt_path}'"
+            )
+        return template
+
+    @staticmethod
+    def _get_prompt_group_with_fallback(*prompt_paths: str) -> Tuple[str, Dict[str, Any]]:
+        """Return the first prompt group that exists and contains prompt templates."""
+        for prompt_path in prompt_paths:
+            prompt_group = get_prompt_group(prompt_path)
+            if isinstance(prompt_group, dict) and (
+                isinstance(prompt_group.get("system"), str)
+                or isinstance(prompt_group.get("user"), str)
+            ):
+                return prompt_path, prompt_group
+
+        # Preserve the original prompt path in the error message for diagnostics.
+        return prompt_paths[0], {}
 
     def get_description(self) -> str:
         """Return the processor description."""
@@ -202,6 +231,22 @@ class ScreenshotProcessor(BaseContextProcessor):
             **kwargs
         }
         logger.info(log_data)
+
+    @staticmethod
+    def _vlm_supports_image_input() -> bool:
+        """Check whether the configured VLM endpoint is expected to accept image inputs."""
+        vlm_config = get_config("vlm_model") or {}
+        provider = str(vlm_config.get("provider", "") or "").strip().lower()
+        base_url = str(vlm_config.get("base_url", "") or "").strip().lower()
+        model = str(vlm_config.get("model", "") or "").strip().lower()
+
+        if provider == "minimax":
+            return False
+        if "minimax.io" in base_url:
+            return False
+        if model.startswith("minimax"):
+            return False
+        return True
 
     def process(self, context: RawContextProperties) -> bool:
         """
@@ -319,9 +364,16 @@ class ScreenshotProcessor(BaseContextProcessor):
             raise ValueError(f"Failed to encode image: {image_path}")
 
         # === UI Change Detection (per-session + per-prompt) ===
-        prompt_group = get_prompt_group("processing.extraction.screenshot_analyze")
-        system_prompt_template = prompt_group.get("system")
-        user_prompt_template = prompt_group.get("user")
+        prompt_path, prompt_group = self._get_prompt_group_with_fallback(
+            "processing.extraction.screenshot_analyze",
+            "processing.extraction.screenshot_contextual_batch",
+        )
+        system_prompt_template = self._require_prompt_template(
+            prompt_group, prompt_path, "system"
+        )
+        user_prompt_template = self._require_prompt_template(
+            prompt_group, prompt_path, "user"
+        )
 
         time_now = datetime.datetime.now()
         user_prompt = user_prompt_template.format(
@@ -383,7 +435,8 @@ IMPORTANT RULES:
 - Do NOT make up descriptions of activities or purposes
 
 Be precise and factual. Only describe the visual evidence.""",
-                            image_url=image_path
+                            image_url=image_path,
+                            timeout_seconds=TOOL_TIMEOUT,
                         ),
                         timeout=TOOL_TIMEOUT
                     )
@@ -436,10 +489,35 @@ Now answer the user's request based on the above."""
             enhanced_user_prompt = user_prompt
             self._structured_log(trace_id, "prompt", "original")
 
-        content = [
-            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_image}"}},
-            {"type": "text", "text": enhanced_user_prompt}
-        ]
+        vlm_supports_image_input = self._vlm_supports_image_input()
+        if vlm_supports_image_input:
+            content = [
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_image}"}},
+                {"type": "text", "text": enhanced_user_prompt}
+            ]
+        else:
+            if not (tool_result and tool_result.status == "success" and tool_result.confidence >= MINIMAX_CONFIDENCE_THRESHOLD):
+                tool_status = getattr(tool_result, "status", None)
+                tool_error = getattr(tool_result, "error_message", None)
+                tool_confidence = getattr(tool_result, "confidence", None)
+                logger.error(
+                    "MiniMax image understanding did not produce a usable result for screenshot analysis. "
+                    f"status={tool_status}, confidence={tool_confidence}, error={tool_error}"
+                )
+                self._structured_log(
+                    trace_id,
+                    "vlm_input",
+                    "missing_text_only_prerequisite",
+                    tool_status=tool_status,
+                    tool_confidence=tool_confidence,
+                    tool_error=tool_error,
+                )
+                raise ValueError(
+                    "Configured VLM does not support image input and MiniMax image understanding did not return a usable result"
+                )
+
+            content = enhanced_user_prompt
+            self._structured_log(trace_id, "vlm_input", "text_only")
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -509,13 +587,16 @@ Now answer the user's request based on the above."""
         Call LLM to merge items and directly return ProcessedContext objects.
         Handles both merged (multiple items -> one) and new (independent) items.
         """
-        prompt_group = get_prompt_group("merging.screenshot_batch_merging")
+        prompt_path = "merging.screenshot_batch_merging"
+        prompt_group = get_prompt_group(prompt_path)
+        system_prompt = self._require_prompt_template(prompt_group, prompt_path, "system")
+        user_prompt = self._require_prompt_template(prompt_group, prompt_path, "user")
         all_items_map = {item.id: item for item in new_items + cached_items}
         items_json = json.dumps([self._item_to_dict(item) for item in new_items + cached_items], ensure_ascii=False, indent=2)
 
         messages = [
-            {"role": "system", "content": prompt_group["system"]},
-            {"role": "user", "content": prompt_group["user"].format(
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt.format(
                 context_type=context_type.value,
                 items_json=items_json
             )},

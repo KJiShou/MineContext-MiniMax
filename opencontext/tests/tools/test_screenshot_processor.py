@@ -264,6 +264,48 @@ class TestCacheKeyFormat:
         assert expected_prefix == "minimax_v1:"
 
 
+class TestPromptValidation:
+    """Tests for screenshot prompt template validation."""
+
+    def test_prompt_group_falls_back_to_legacy_alias(self):
+        with patch(
+            "opencontext.context_processing.processor.screenshot_processor.get_prompt_group",
+            side_effect=[
+                {},
+                {"system": "SYS {context_type_descriptions}", "user": "USER"},
+            ],
+        ):
+            prompt_path, prompt_group = ScreenshotProcessor._get_prompt_group_with_fallback(
+                "processing.extraction.screenshot_analyze",
+                "processing.extraction.screenshot_contextual_batch",
+            )
+
+        assert prompt_path == "processing.extraction.screenshot_contextual_batch"
+        assert prompt_group["system"] == "SYS {context_type_descriptions}"
+
+    def test_require_prompt_template_rejects_missing_field(self):
+        with pytest.raises(ValueError, match="Prompt field 'user' is missing or empty"):
+            ScreenshotProcessor._require_prompt_template(
+                {"system": "SYS"}, "processing.extraction.screenshot_analyze", "user"
+            )
+
+    def test_process_vlm_single_reports_missing_prompt_field(self, tmp_path):
+        processor = ScreenshotProcessor(session_id="missing_prompt")
+        get_tool_cache().clear()
+        image_path = _create_test_image(tmp_path)
+        raw_context = _create_raw_context(image_path)
+
+        try:
+            with patch(
+                "opencontext.context_processing.processor.screenshot_processor.get_prompt_group",
+                return_value={"system": "SYS {context_type_descriptions}", "user": None},
+            ):
+                with pytest.raises(ValueError, match="Prompt field 'user' is missing or empty"):
+                    asyncio.run(processor._process_vlm_single(raw_context))
+        finally:
+            processor.shutdown()
+
+
 def _create_test_image(tmp_path) -> str:
     image_path = tmp_path / "screenshot.png"
     Image.new("RGB", (32, 32), color=(255, 255, 255)).save(image_path)
@@ -303,6 +345,13 @@ class TestMiniMaxPromptIntegration:
 
         try:
             with patch(
+                "opencontext.context_processing.processor.screenshot_processor.get_config",
+                return_value={
+                    "provider": "custom",
+                    "base_url": "https://api.minimax.io/v1",
+                    "model": "MiniMax-M2.7",
+                },
+            ), patch(
                 "opencontext.context_processing.processor.screenshot_processor.get_prompt_group",
                 return_value={
                     "system": "SYS {context_type_descriptions}",
@@ -324,8 +373,10 @@ class TestMiniMaxPromptIntegration:
         assert result == []
         assert mock_execute.await_count == 1
         assert mock_execute.await_args.kwargs["image_url"] == image_path
+        assert mock_execute.await_args.kwargs["timeout_seconds"] == TOOL_TIMEOUT
 
-        prompt_text = captured_messages["messages"][1]["content"][1]["text"]
+        prompt_text = captured_messages["messages"][1]["content"]
+        assert isinstance(prompt_text, str)
         assert "Vision analysis" in prompt_text
         assert "Visible editor, file tree, and a code pane." in prompt_text
 
@@ -348,6 +399,62 @@ class TestMiniMaxPromptIntegration:
 
         try:
             with patch(
+                "opencontext.context_processing.processor.screenshot_processor.get_config",
+                return_value={
+                    "provider": "custom",
+                    "base_url": "https://api.minimax.io/v1",
+                    "model": "MiniMax-M2.7",
+                },
+            ), patch(
+                "opencontext.context_processing.processor.screenshot_processor.get_prompt_group",
+                return_value={
+                    "system": "SYS {context_type_descriptions}",
+                    "user": "USER {current_date} {current_timestamp} {current_timezone}",
+                },
+            ), patch(
+                "opencontext.tools.operation_tools.minimax_image_understanding.MinimaxImageUnderstandingTool.execute_async",
+                new=mock_execute,
+            ), patch(
+                "opencontext.context_processing.processor.screenshot_processor.generate_with_messages_async",
+                side_effect=fake_generate,
+            ), patch.object(
+                processor, "_extract_items_from_response", return_value=[]
+            ):
+                with pytest.raises(ValueError, match="Configured VLM does not support image input"):
+                    asyncio.run(processor._process_vlm_single(raw_context))
+        finally:
+            processor.shutdown()
+
+        assert "messages" not in captured_messages
+
+    def test_image_capable_vlm_still_receives_image_content(self, tmp_path):
+        processor = ScreenshotProcessor(session_id="image_capable_vlm")
+        get_tool_cache().clear()
+        image_path = _create_test_image(tmp_path)
+        raw_context = _create_raw_context(image_path)
+        captured_messages = {}
+        mock_execute = AsyncMock(
+            return_value=ToolResponse.success(
+                tool_type=ToolType.IMAGE_UNDERSTANDING.value,
+                data={"content": "A browser window is visible."},
+                confidence=0.91,
+                summary="A browser window is visible.",
+            )
+        )
+
+        async def fake_generate(messages, *args, **kwargs):
+            captured_messages["messages"] = messages
+            return '{"ok": true}'
+
+        try:
+            with patch(
+                "opencontext.context_processing.processor.screenshot_processor.get_config",
+                return_value={
+                    "provider": "openai",
+                    "base_url": "https://api.openai.com/v1",
+                    "model": "gpt-4.1",
+                },
+            ), patch(
                 "opencontext.context_processing.processor.screenshot_processor.get_prompt_group",
                 return_value={
                     "system": "SYS {context_type_descriptions}",
@@ -367,9 +474,10 @@ class TestMiniMaxPromptIntegration:
             processor.shutdown()
 
         assert result == []
-        prompt_text = captured_messages["messages"][1]["content"][1]["text"]
-        assert "Vision analysis" not in prompt_text
-        assert prompt_text.startswith("USER ")
+        content = captured_messages["messages"][1]["content"]
+        assert isinstance(content, list)
+        assert content[0]["type"] == "image_url"
+        assert content[1]["type"] == "text"
 
 
 if __name__ == "__main__":

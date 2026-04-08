@@ -143,9 +143,10 @@ class TestMinimaxImageUnderstandingTool:
         mock_client = MagicMock()
         mock_client.call_tool_text = AsyncMock(return_value="A detailed screenshot analysis.")
 
+        mock_client.close = AsyncMock()
         with patch(
-            "opencontext.tools.operation_tools.minimax_image_understanding.get_minimax_mcp_client",
-            new=AsyncMock(return_value=mock_client),
+            "opencontext.tools.operation_tools.minimax_image_understanding.create_minimax_mcp_client",
+            return_value=mock_client,
         ):
             response = asyncio.run(
                 tool.execute_async(
@@ -157,6 +158,7 @@ class TestMinimaxImageUnderstandingTool:
         assert response.status == ToolStatus.SUCCESS.value
         assert response.summary == "A detailed screenshot analysis."
         assert response.data["content"] == "A detailed screenshot analysis."
+        assert mock_client.close.await_count == 1
 
     def test_local_file_is_accepted_and_calls_mcp(self, tmp_path):
         tool = _build_tool(
@@ -166,9 +168,10 @@ class TestMinimaxImageUnderstandingTool:
         mock_client = MagicMock()
         mock_client.call_tool_text = AsyncMock(return_value="Local image analysis.")
 
+        mock_client.close = AsyncMock()
         with patch(
-            "opencontext.tools.operation_tools.minimax_image_understanding.get_minimax_mcp_client",
-            new=AsyncMock(return_value=mock_client),
+            "opencontext.tools.operation_tools.minimax_image_understanding.create_minimax_mcp_client",
+            return_value=mock_client,
         ):
             response = asyncio.run(
                 tool.execute_async(
@@ -179,6 +182,7 @@ class TestMinimaxImageUnderstandingTool:
 
         assert response.status == ToolStatus.SUCCESS.value
         assert response.data["content"] == "Local image analysis."
+        assert mock_client.close.await_count == 1
 
     def test_data_url_is_accepted_and_calls_mcp(self):
         tool = _build_tool(
@@ -187,9 +191,10 @@ class TestMinimaxImageUnderstandingTool:
         mock_client = MagicMock()
         mock_client.call_tool_text = AsyncMock(return_value="Data URL analysis.")
 
+        mock_client.close = AsyncMock()
         with patch(
-            "opencontext.tools.operation_tools.minimax_image_understanding.get_minimax_mcp_client",
-            new=AsyncMock(return_value=mock_client),
+            "opencontext.tools.operation_tools.minimax_image_understanding.create_minimax_mcp_client",
+            return_value=mock_client,
         ):
             response = asyncio.run(
                 tool.execute_async(
@@ -200,6 +205,7 @@ class TestMinimaxImageUnderstandingTool:
 
         assert response.status == ToolStatus.SUCCESS.value
         assert response.data["content"] == "Data URL analysis."
+        assert mock_client.close.await_count == 1
 
     def test_execute_api_call_maps_public_image_url_to_mcp_image_source(self):
         tool = _build_tool(
@@ -208,9 +214,10 @@ class TestMinimaxImageUnderstandingTool:
         mock_client = MagicMock()
         mock_client.call_tool_text = AsyncMock(return_value="Mapped analysis.")
 
+        mock_client.close = AsyncMock()
         with patch(
-            "opencontext.tools.operation_tools.minimax_image_understanding.get_minimax_mcp_client",
-            new=AsyncMock(return_value=mock_client),
+            "opencontext.tools.operation_tools.minimax_image_understanding.create_minimax_mcp_client",
+            return_value=mock_client,
         ):
             result = asyncio.run(
                 tool._execute_api_call(
@@ -227,6 +234,7 @@ class TestMinimaxImageUnderstandingTool:
             "image_source": "https://example.com/image.png",
         }
         assert kwargs["timeout_seconds"] == 30.0
+        assert mock_client.close.await_count == 1
 
     def test_mcp_startup_failure_returns_error(self):
         tool = _build_tool(
@@ -234,8 +242,8 @@ class TestMinimaxImageUnderstandingTool:
         )
 
         with patch(
-            "opencontext.tools.operation_tools.minimax_image_understanding.get_minimax_mcp_client",
-            new=AsyncMock(side_effect=RuntimeError("boom")),
+            "opencontext.tools.operation_tools.minimax_image_understanding.create_minimax_mcp_client",
+            side_effect=RuntimeError("boom"),
         ):
             response = asyncio.run(
                 tool.execute_async(
@@ -253,10 +261,11 @@ class TestMinimaxImageUnderstandingTool:
         )
         mock_client = MagicMock()
         mock_client.call_tool_text = AsyncMock(side_effect=TimeoutError("timed out"))
+        mock_client.close = AsyncMock()
 
         with patch(
-            "opencontext.tools.operation_tools.minimax_image_understanding.get_minimax_mcp_client",
-            new=AsyncMock(return_value=mock_client),
+            "opencontext.tools.operation_tools.minimax_image_understanding.create_minimax_mcp_client",
+            return_value=mock_client,
         ):
             response = asyncio.run(
                 tool.execute_async(
@@ -267,3 +276,4 @@ class TestMinimaxImageUnderstandingTool:
 
         assert response.status == ToolStatus.ERROR.value
         assert "timed out" in response.error_message
+        assert mock_client.close.await_count == 1

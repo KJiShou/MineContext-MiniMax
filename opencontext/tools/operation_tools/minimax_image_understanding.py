@@ -9,10 +9,11 @@ MiniMax image understanding tool.
 Provides AI-powered image analysis.
 """
 
+import contextlib
 import os
 from typing import Any, Dict
 
-from opencontext.tools.operation_tools.minimax_mcp_client import get_minimax_mcp_client
+from opencontext.tools.operation_tools.minimax_mcp_client import create_minimax_mcp_client
 from opencontext.tools.operation_tools.minimax_base import MiniMaxBaseTool
 from opencontext.tools.tool_response import ToolResponse, ToolType
 from opencontext.utils.logging_utils import get_logger
@@ -82,12 +83,23 @@ class MinimaxImageUnderstandingTool(MiniMaxBaseTool):
         timeout_seconds = float(params.get("timeout_seconds", 30.0))
         logger.info(f"MiniMax MCP image understanding: {image_url}")
 
-        client = await get_minimax_mcp_client(self._api_key, self._base_url)
-        content = await client.call_tool_text(
-            "understand_image",
-            {"prompt": prompt, "image_source": image_url},
-            timeout_seconds=timeout_seconds,
-        )
+        client = create_minimax_mcp_client(self._api_key, self._base_url)
+        logger.info(f"MiniMax MCP runtime details: {client.describe_runtime()}")
+        try:
+            content = await client.call_tool_text(
+                "understand_image",
+                {"prompt": prompt, "image_source": image_url},
+                timeout_seconds=timeout_seconds,
+            )
+        except Exception as exc:
+            logger.exception(
+                f"MiniMax MCP image understanding failed for '{image_url}' "
+                f"with runtime [{client.describe_runtime()}]: {exc}"
+            )
+            raise
+        finally:
+            with contextlib.suppress(Exception):
+                await client.close()
         return {"content": content}
 
     def _format_summary(self, data: Any, params: Dict[str, Any]) -> str:

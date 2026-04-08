@@ -79,8 +79,11 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[
-        ('config/config.yaml', 'config'), 
-        ('opencontext/web/static', 'opencontext/web/static'), 
+        ('config/config.yaml', 'config'),
+        ('config/prompts_zh.yaml', 'config'),
+        ('config/prompts_en.yaml', 'config'),
+        ('config/quick_start_default.md', 'config'),
+        ('opencontext/web/static', 'opencontext/web/static'),
         ('opencontext/web/templates', 'opencontext/web/templates')
     ],
     hiddenimports=[

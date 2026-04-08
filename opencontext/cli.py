@@ -31,6 +31,17 @@ _config_path = None
 _context_lab_instance = None
 
 
+def _should_run_embedded_minimax_mcp_server() -> bool:
+    return len(sys.argv) > 1 and sys.argv[1] == "run-minimax-mcp-server"
+
+
+if _should_run_embedded_minimax_mcp_server():
+    from minimax_mcp.server import main as minimax_mcp_main
+
+    minimax_mcp_main()
+    sys.exit(0)
+
+
 def get_or_create_context_lab():
     """Get or create the global OpenContext instance for the current process."""
     global _context_lab_instance, _config_path
@@ -163,6 +174,11 @@ def parse_args() -> argparse.Namespace:
         "--workers", type=int, default=1, help="Number of worker processes (default: 1)"
     )
 
+    mcp_parser = subparsers.add_parser(
+        "run-minimax-mcp-server", help=argparse.SUPPRESS
+    )
+    mcp_parser.add_argument("--config", type=str, help=argparse.SUPPRESS)
+
     return parser.parse_args()
 
 
@@ -240,6 +256,19 @@ def handle_start(args: argparse.Namespace) -> int:
     return 0
 
 
+def handle_run_minimax_mcp_server() -> int:
+    """Run the bundled MiniMax MCP server inside the packaged backend executable."""
+    try:
+        from minimax_mcp.server import main as minimax_mcp_main
+
+        logger.info("Starting bundled MiniMax MCP server")
+        minimax_mcp_main()
+        return 0
+    except Exception as e:
+        logger.exception(f"Failed to start bundled MiniMax MCP server: {e}")
+        return 1
+
+
 def _setup_logging(config_path: Optional[str]) -> None:
     """Setup logging configuration.
 
@@ -275,6 +304,8 @@ def main() -> int:
 
     if args.command == "start":
         return handle_start(args)
+    if args.command == "run-minimax-mcp-server":
+        return handle_run_minimax_mcp_server()
     else:
         logger.error(f"Unknown command: {args.command}")
         return 1

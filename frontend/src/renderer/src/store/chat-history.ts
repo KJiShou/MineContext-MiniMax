@@ -36,6 +36,10 @@ export interface ChatHistoryState {
   creation: {
     aiAssistantVisible: boolean
   }
+  // Conversations with active background generation
+  backgroundGeneratingConversations: number[]
+  // Active AI chat messages (for persistence across navigation)
+  activeChatMessages: { [conversationId: number]: ChatMessage[] }
 }
 
 const initialState: ChatHistoryState = {
@@ -49,7 +53,9 @@ const initialState: ChatHistoryState = {
   },
   creation: {
     aiAssistantVisible: false
-  }
+  },
+  backgroundGeneratingConversations: [],
+  activeChatMessages: {}
 }
 
 const chatHistorySlice = createSlice({
@@ -226,6 +232,52 @@ const chatHistorySlice = createSlice({
      */
     resetChatHistory(state) {
       Object.assign(state, initialState)
+    },
+
+    // ========== Background Generation Management ==========
+
+    /**
+     * Add conversation ID to background generating list
+     */
+    addBackgroundGeneratingConversation(state, action: PayloadAction<number>) {
+      if (!state.backgroundGeneratingConversations.includes(action.payload)) {
+        state.backgroundGeneratingConversations.push(action.payload)
+      }
+    },
+
+    /**
+     * Remove conversation ID from background generating list
+     */
+    removeBackgroundGeneratingConversation(state, action: PayloadAction<number>) {
+      state.backgroundGeneratingConversations = state.backgroundGeneratingConversations.filter(
+        (id) => id !== action.payload
+      )
+    },
+
+    /**
+     * Set active chat messages for a conversation
+     */
+    setActiveChatMessages(state, action: PayloadAction<{ conversationId: number; messages: ChatMessage[] }>) {
+      const { conversationId, messages } = action.payload
+      state.activeChatMessages[conversationId] = messages
+    },
+
+    /**
+     * Append message to active chat messages
+     */
+    appendActiveChatMessage(state, action: PayloadAction<{ conversationId: number; message: ChatMessage }>) {
+      const { conversationId, message } = action.payload
+      if (!state.activeChatMessages[conversationId]) {
+        state.activeChatMessages[conversationId] = []
+      }
+      state.activeChatMessages[conversationId].push(message)
+    },
+
+    /**
+     * Clear active chat messages for a conversation
+     */
+    clearActiveChatMessages(state, action: PayloadAction<number>) {
+      delete state.activeChatMessages[action.payload]
     }
   }
 })
@@ -254,7 +306,14 @@ export const {
   setLoading,
   setError,
   clearError,
-  resetChatHistory
+  resetChatHistory,
+  // Background generation
+  addBackgroundGeneratingConversation,
+  removeBackgroundGeneratingConversation,
+  // Active chat messages
+  setActiveChatMessages,
+  appendActiveChatMessage,
+  clearActiveChatMessages
 } = chatHistorySlice.actions
 
 export default chatHistorySlice.reducer

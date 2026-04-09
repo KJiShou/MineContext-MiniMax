@@ -5,7 +5,7 @@ import React, { useState, useCallback, useMemo, FC, useEffect } from 'react'
 import { Button, Input, Typography, Tag } from '@arco-design/web-react'
 import { IconStop } from '@arco-design/web-react/icon'
 import { useChatStream } from '@renderer/hooks/use-chat-stream'
-import { ChatContext } from '@renderer/services/ChatStreamService'
+import { ChatContext, ChatMessage } from '@renderer/services/ChatStreamService'
 import MarkdownIt from 'markdown-it'
 import chatEditIcon from '@renderer/assets/icons/chat-edit.svg'
 import chatSendIcon from '@renderer/assets/icons/chat-send.svg'
@@ -15,6 +15,8 @@ import { getLogger } from '@shared/logger/renderer'
 import { messageService } from '@renderer/services/messages-service'
 import { sanitizeAssistantContent } from '@renderer/utils/chat-content'
 import { AIAssistantHeader } from './header'
+import { useSelector } from 'react-redux'
+import { RootState } from '@renderer/store'
 
 const { Text } = Typography
 const { TextArea } = Input
@@ -66,7 +68,8 @@ const AIAssistant: FC<AIAssistantProps> = (props) => {
     stopStreaming,
     clearChat,
     setChatState,
-    messageId: currentMessageId
+    messageId: currentMessageId,
+    syncMessagesToRedux
   } = useChatStream()
   const [conversationId, setConversationId] = useState<number>()
   const { runAsync: createConversation } = useRequest(conversationService.createConversation, { manual: true })
@@ -84,9 +87,25 @@ const AIAssistant: FC<AIAssistantProps> = (props) => {
       }))
     }
   })
+
+  // Get persisted messages from Redux
+  const activeChatMessages = useSelector((state: RootState) => state.chatHistory.activeChatMessages)
+
   useEffect(() => {
     if (initConversationId) {
-      getConversationMessages(initConversationId)
+      // First check if we have persisted messages in Redux
+      const persistedMessages = activeChatMessages[initConversationId]
+      if (persistedMessages && persistedMessages.length > 0) {
+        setChatState((prev) => ({
+          ...prev,
+          messages: persistedMessages
+        }))
+        setConversationId(initConversationId)
+      } else {
+        // Load from API if not in Redux
+        getConversationMessages(initConversationId)
+        setConversationId(initConversationId)
+      }
     }
   }, [initConversationId])
 

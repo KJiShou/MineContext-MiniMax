@@ -14,7 +14,9 @@ import { sanitizeAssistantContent } from '@renderer/utils/chat-content'
 import { get } from 'lodash'
 import {
   addBackgroundGeneratingConversation,
-  removeBackgroundGeneratingConversation
+  removeBackgroundGeneratingConversation,
+  setActiveChatMessages,
+  appendActiveChatMessage
 } from '@renderer/store/chat-history'
 
 export interface ChatState {
@@ -50,6 +52,7 @@ export const useChatStream = () => {
   const [streamingMessage, setStreamingMessage] = useState<StreamingMessage | null>(null)
   const currentStreamingId = useRef<string | null>(null)
   const currentConversationId = useRef<number | null>(null)
+  const isInitialized = useRef(false)
 
   // Note: We don't abort streams on unmount to allow background generation
   // when navigating between pages. Streams are aborted per-conversation via
@@ -68,6 +71,9 @@ export const useChatStream = () => {
         role: 'user',
         content: query.trim()
       }
+
+      // Store user message in Redux for persistence
+      dispatch(appendActiveChatMessage({ conversationId: conversation_id, message: userMessage }))
 
       setChatState((prev) => ({
         ...prev,
@@ -339,6 +345,9 @@ export const useChatStream = () => {
     sendMessage,
     clearChat,
     stopStreaming,
-    setChatState
+    setChatState,
+    syncMessagesToRedux: (conversationId: number, messages: ChatMessage[]) => {
+      dispatch(setActiveChatMessages({ conversationId, messages }))
+    }
   }
 }

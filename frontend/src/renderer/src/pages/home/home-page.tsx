@@ -36,7 +36,8 @@ const HomePage: React.FC = () => {
   const { controller, defaultSizes, leftMinSize, rightMinSize } = useAllotment(isVisible)
   const dispatch = useAppDispatch()
   useUnmount(() => {
-    dispatch(setActiveConversationId(null))
+    // Don't clear activeConversationId - allow background generation to continue
+    // Only hide AI assistant, don't reset conversation state
     dispatch(toggleHomeAiAssistant(false))
   })
   const [selectedDays, setSelectedDays] = useState<string | null>(null)

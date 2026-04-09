@@ -121,16 +121,24 @@ const CustomFormItems: FC<CustomFormItemsProps> = (props) => {
 export interface StandardFormItemsProps {
   modelPlatform: ModelTypeList
   prefix: string
+  useCustomEmbeddingInitial?: boolean
 }
 const StandardFormItems: FC<StandardFormItemsProps> = (props) => {
-  const { modelPlatform, prefix } = props
+  const { modelPlatform, prefix, useCustomEmbeddingInitial = false } = props
   const option = useMemo(() => {
     const foundItem = find(ModelInfoList, (item) => item.value === modelPlatform)
     return foundItem ? foundItem.option : []
   }, [modelPlatform])
 
   const isMiniMax = modelPlatform === ModelTypeList.MiniMax
-  const [useCustomEmbedding, setUseCustomEmbedding] = useState(false)
+  const [useCustomEmbedding, setUseCustomEmbedding] = useState(useCustomEmbeddingInitial)
+
+  // Sync state when prop changes (e.g., after form values load from API)
+  useEffect(() => {
+    if (useCustomEmbeddingInitial) {
+      setUseCustomEmbedding(true)
+    }
+  }, [useCustomEmbeddingInitial])
 
   return (
     <>
@@ -201,7 +209,7 @@ const StandardFormItems: FC<StandardFormItemsProps> = (props) => {
             <span className="text-[#0B0B0F] font-roboto text-base font-normal leading-[22px]">
               Use custom embedding model
             </span>
-            <Switch onChange={setUseCustomEmbedding} />
+            <Switch checked={useCustomEmbedding} onChange={setUseCustomEmbedding} />
           </div>
           {useCustomEmbedding && (
             <div className="flex flex-col gap-[8px]">
@@ -350,7 +358,11 @@ const Settings: FC<SettingsProps> = (props) => {
     const config = get(modelInfo, 'config')
     if (!getInfoLoading && !isEmpty(config) && !init) {
       const settingsValue = new Map<keyof SettingsFormProps, string>()
-      const prefix = config.modelPlatform as ModelTypeList
+      // Normalize modelPlatform to lowercase to match ModelTypeList enum values
+      const normalizedPlatform =
+        Object.values(ModelTypeList).find((v) => v.toLowerCase() === config.modelPlatform.toLowerCase()) ||
+        config.modelPlatform
+      const prefix = normalizedPlatform as ModelTypeList
       settingsValue.set(`modelPlatform`, prefix)
       Object.keys(config).reduce((acc, key) => {
         if (!acc.has(`${prefix}-${key}` as keyof SettingsFormProps) && !!config[key]) {
@@ -388,7 +400,11 @@ const Settings: FC<SettingsProps> = (props) => {
                 <ModelRadio />
               </FormItem>
               <FormItem
-                shouldUpdate={(prevValues, currentValues) => prevValues.modelPlatform !== currentValues.modelPlatform}
+                shouldUpdate={(prevValues, currentValues) => {
+                  if (prevValues.modelPlatform !== currentValues.modelPlatform) return true
+                  if (currentValues.modelPlatform === ModelTypeList.MiniMax) return true
+                  return false
+                }}
                 noStyle>
                 {(values) => {
                   const modelPlatform = values.modelPlatform
@@ -397,7 +413,18 @@ const Settings: FC<SettingsProps> = (props) => {
                   } else if (modelPlatform === ModelTypeList.Doubao) {
                     return <StandardFormItems modelPlatform={modelPlatform} prefix={ModelTypeList.Doubao} />
                   } else if (modelPlatform === ModelTypeList.MiniMax) {
-                    return <StandardFormItems modelPlatform={modelPlatform} prefix={ModelTypeList.MiniMax} />
+                    const miniMaxInitial = !!(
+                      values[`${ModelTypeList.MiniMax}-embeddingModelId`] &&
+                      values[`${ModelTypeList.MiniMax}-embeddingBaseUrl`]
+                    )
+                    return (
+                      <StandardFormItems
+                        key={`${modelPlatform}-${miniMaxInitial}`}
+                        modelPlatform={modelPlatform}
+                        prefix={ModelTypeList.MiniMax}
+                        useCustomEmbeddingInitial={miniMaxInitial}
+                      />
+                    )
                   } else if (modelPlatform === ModelTypeList.OpenAI) {
                     return <StandardFormItems modelPlatform={modelPlatform} prefix={ModelTypeList.OpenAI} />
                   } else {

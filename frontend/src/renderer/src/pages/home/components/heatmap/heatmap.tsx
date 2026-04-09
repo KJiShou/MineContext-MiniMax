@@ -75,41 +75,49 @@ export interface HeatmapEntryProps {
 }
 const HeatmapEntry: FC<HeatmapEntryProps> = (props) => {
   const { onChange } = props
-  const { data, loading } = useRequest(async () => {
-    const res = await window.dbAPI.getHeatmapData(dayjs('2025-01-01').valueOf(), dayjs('2025-12-31').valueOf())
-
-    const dataList = res.reduce(
-      (acc, cur) => {
-        const todos = get(cur, 'todos', 0)
-        const conversations = get(cur, 'conversations', 0)
-        const vaults = get(cur, 'vaults', 0)
-        const context = get(cur, 'context', 0)
-        set(acc, cur.date, {
-          count: conversations + vaults + context / 100 + todos,
-          conversations,
-          vaults,
-          context,
-          todos
-        })
-        set(acc, 'totalTodos', get(acc, 'totalTodos', 0) + todos)
-        set(acc, 'totalConversations', get(acc, 'totalConversations', 0) + conversations)
-        set(acc, 'totalVaults', get(acc, 'totalVaults', 0) + vaults)
-        set(acc, 'totalContext', get(acc, 'totalContext', 0) + context)
-        set(acc, 'origin', get(acc, 'totalContext', 0) + context)
-        return acc
-      },
-      {} as Record<string, number>
-    )
-
-    return dataList
-  })
   const yearList = useMemo(() => {
-    const currentYear = dayjs().year() // 当前年份
-    const targetYear = 2025
-    const diff = targetYear - currentYear
-    return Array.from({ length: diff + 1 }, (_, i) => currentYear + i)
+    const currentYear = dayjs().year()
+    const startYear = 2025
+    const diff = currentYear - startYear
+    return Array.from({ length: diff + 1 }, (_, i) => startYear + i)
   }, [])
-  const [selectedYear, setSelectedYear] = useState(yearList[0])
+  const [selectedYear, setSelectedYear] = useState(yearList[yearList.length - 1])
+
+  const { data, loading, run } = useRequest(
+    async (year: number) => {
+      const res = await window.dbAPI.getHeatmapData(dayjs(`${year}-01-01`).valueOf(), dayjs(`${year}-12-31`).valueOf())
+
+      const dataList = res.reduce(
+        (acc, cur) => {
+          const todos = get(cur, 'todos', 0)
+          const conversations = get(cur, 'conversations', 0)
+          const vaults = get(cur, 'vaults', 0)
+          const context = get(cur, 'context', 0)
+          set(acc, cur.date, {
+            count: conversations + vaults + context / 100 + todos,
+            conversations,
+            vaults,
+            context,
+            todos
+          })
+          set(acc, 'totalTodos', get(acc, 'totalTodos', 0) + todos)
+          set(acc, 'totalConversations', get(acc, 'totalConversations', 0) + conversations)
+          set(acc, 'totalVaults', get(acc, 'totalVaults', 0) + vaults)
+          set(acc, 'totalContext', get(acc, 'totalContext', 0) + context)
+          set(acc, 'origin', get(acc, 'totalContext', 0) + context)
+          return acc
+        },
+        {} as Record<string, number>
+      )
+
+      return dataList
+    },
+    { manual: true }
+  )
+
+  useEffect(() => {
+    run(selectedYear)
+  }, [selectedYear])
   const [selectedDays, setSelectedDays] = useState<string | null>(null)
   const [currentMode, setCurrentMode] = useState<MonthType>(MonthType.YEAR)
 
@@ -136,7 +144,7 @@ const HeatmapEntry: FC<HeatmapEntryProps> = (props) => {
   })
   const handleSubtract = useMemoizedFn(() => {
     const days = dayjs(selectedDays).subtract(1, 'day').format('YYYY-MM-DD')
-    if (dayjs(days).isSameOrAfter(dayjs('2025-01-01'))) {
+    if (dayjs(days).isSameOrAfter(dayjs(`${yearList[0]}-01-01`))) {
       setSelectedDays(days)
     } else {
       Message.info('Cannot select past date')

@@ -83,7 +83,7 @@ class HeatmapService {
 
       // Fetch data from all sources in parallel
       const [todos, conversations, vaults, monitoringTrend] = await Promise.all([
-        this.getToDosData(startTime, endTime, 1), // Only fetch completed todos
+        this.getToDosData(startTime, endTime), // Fetch all todos (no status filter)
         this.getConversationsData(startTime, endTime, 'active'),
         this.getVaultsData(startTime, endTime),
         this.getMonitoringTrendData(startTime, endTime)
@@ -92,9 +92,9 @@ class HeatmapService {
       // Generate date range
       const dateMap = this.generateDateMap(startTime, endTime)
 
-      // Aggregate todos by date
+      // Aggregate todos by date (using created_at, not start_time)
       todos.forEach((todo) => {
-        const date = dayjs(todo.start_time).format('YYYY-MM-DD')
+        const date = dayjs(todo.created_at).format('YYYY-MM-DD')
         if (dateMap[date]) {
           dateMap[date].todos++
         }
@@ -181,15 +181,12 @@ class HeatmapService {
   /**
    * Fetch todos data from ToDoService
    */
-  private static async getToDosData(startTime: number, endTime: number, status: number) {
+  private static async getToDosData(startTime: number, endTime: number) {
     try {
-      // Note: ToDoService uses startTimeFrom/startTimeTo for filtering
-      // We use these to filter by when the todo was started, not created
       return ToDoService.queryToDos({
         startTimeFrom: startTime,
         startTimeTo: endTime,
-        limit: 10000, // High limit to get all data
-        status
+        limit: 10000 // High limit to get all data
       })
     } catch (error) {
       logger.error('Failed to fetch todos data:', error)

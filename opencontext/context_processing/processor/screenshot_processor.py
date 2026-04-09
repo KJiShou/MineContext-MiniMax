@@ -50,7 +50,7 @@ logger = get_logger(__name__)
 
 # MiniMax tool integration constants
 MINIMAX_CONFIDENCE_THRESHOLD = 0.4
-TOOL_TIMEOUT = 60  # seconds
+TOOL_TIMEOUT = 120  # seconds (extended for frozen build MCP cold-start)
 IMAGE_CACHE_TTL = 86400  # 24 hours
 MAX_SUMMARY_CHARS = 4000
 MAX_DATA_ITEMS = 20

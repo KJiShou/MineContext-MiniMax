@@ -17,12 +17,14 @@ export enum ModelTypeList {
 export enum embeddingModels {
   DoubaoEmbeddingModelId = 'doubao-embedding-vision-250615',
   OpenAIEmbeddingModelId = 'text-embedding-3-large',
-  MiniMaxEmbeddingModelId = 'embo-01'
+  MiniMaxEmbeddingModelId = 'embo-01',
+  OllamaEmbeddingModelId = 'bge-m3'
 }
 export enum BaseUrl {
   DoubaoUrl = 'https://ark.cn-beijing.volces.com/api/v3',
   OpenAIUrl = 'https://api.openai.com/v1',
-  MiniMaxUrl = 'https://api.minimax.io/v1'
+  MiniMaxUrl = 'https://api.minimax.io/v1',
+  OllamaUrl = 'http://localhost:11434/v1'
 }
 export interface OptionInfo {
   value: string

@@ -1,8 +1,8 @@
 // Copyright (c) 2025 Beijing Volcano Engine Technology Co., Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
-import { FC, useMemo, useEffect } from 'react'
-import { Form, Button, Select, Input, Typography, Spin, Message } from '@arco-design/web-react'
+import { FC, useMemo, useEffect, useState } from 'react'
+import { Form, Button, Select, Input, Typography, Spin, Message, Switch } from '@arco-design/web-react'
 import { find, get, isEmpty, pick } from 'lodash'
 
 import ModelRadio from './components/modelRadio/model-radio'
@@ -129,6 +129,9 @@ const StandardFormItems: FC<StandardFormItemsProps> = (props) => {
     return foundItem ? foundItem.option : []
   }, [modelPlatform])
 
+  const isMiniMax = modelPlatform === ModelTypeList.MiniMax
+  const [useCustomEmbedding, setUseCustomEmbedding] = useState(false)
+
   return (
     <>
       <FormItem
@@ -168,8 +171,8 @@ const StandardFormItems: FC<StandardFormItemsProps> = (props) => {
               {modelPlatform === ModelTypeList.Doubao
                 ? 'Get Doubao API Key'
                 : modelPlatform === ModelTypeList.MiniMax
-                ? 'Get MiniMax API Key'
-                : 'Get OpenAI API Key'}
+                  ? 'Get MiniMax API Key'
+                  : 'Get OpenAI API Key'}
             </Button>
           </div>
         }
@@ -192,6 +195,58 @@ const StandardFormItems: FC<StandardFormItemsProps> = (props) => {
           defaultVisibility={false}
         />
       </FormItem>
+      {isMiniMax && (
+        <div className="flex flex-col gap-6 mb-6">
+          <div className="flex items-center gap-3">
+            <span className="text-[#0B0B0F] font-roboto text-base font-normal leading-[22px]">
+              Use custom embedding model
+            </span>
+            <Switch onChange={setUseCustomEmbedding} />
+          </div>
+          {useCustomEmbedding && (
+            <div className="flex flex-col gap-[8px]">
+              <span className="text-[#0B0B0F] font-roboto text-base font-normal leading-[22px]">Embedding model</span>
+              <FormItem
+                field={`${prefix}-embeddingModelId`}
+                className="!mb-0"
+                rules={[{ required: true, message: 'Cannot be empty' }]}
+                requiredSymbol={false}>
+                <Input
+                  addBefore={<InputPrefix label="Model name" />}
+                  placeholder="bge-m3"
+                  allowClear
+                  className="!w-[574px]"
+                />
+              </FormItem>
+              <FormItem
+                field={`${prefix}-embeddingBaseUrl`}
+                className="!mb-0"
+                rules={[{ required: true, message: 'Cannot be empty' }]}
+                requiredSymbol={false}>
+                <Input
+                  addBefore={<InputPrefix label="Base URL" />}
+                  placeholder="http://localhost:11434/v1"
+                  allowClear
+                  className="!w-[574px]"
+                />
+              </FormItem>
+              <FormItem
+                field={`${prefix}-embeddingApiKey`}
+                className="!mb-0"
+                rules={[{ required: true, message: 'Cannot be empty' }]}
+                requiredSymbol={false}>
+                <Input.Password
+                  addBefore={<InputPrefix label="API Key" />}
+                  placeholder="Enter your API Key (any string for Ollama)"
+                  allowClear
+                  className="!w-[574px]"
+                  defaultVisibility={false}
+                />
+              </FormItem>
+            </div>
+          )}
+        </div>
+      )}
     </>
   )
 }
@@ -208,6 +263,11 @@ export type SettingsFormProps = SettingsFormBase & {
     | `${ModelTypeList.Custom}-embeddingModelId`
     | `${ModelTypeList.Custom}-embeddingBaseUrl`
     | `${ModelTypeList.Custom}-embeddingApiKey`]?: string
+} & {
+  [K in
+    | `${ModelTypeList.MiniMax}-embeddingModelId`
+    | `${ModelTypeList.MiniMax}-embeddingBaseUrl`
+    | `${ModelTypeList.MiniMax}-embeddingApiKey`]?: string
 }
 const Settings: FC<SettingsProps> = (props) => {
   const { closeSetting, init } = props
@@ -263,12 +323,20 @@ const Settings: FC<SettingsProps> = (props) => {
         return embeddingModels.OpenAIEmbeddingModelId
       }
 
+      const isMiniMax = values.modelPlatform === ModelTypeList.MiniMax
+      const hasCustomEmbedding = isMiniMax && formatData.embeddingModelId && formatData.embeddingBaseUrl
+
       const params = isCustom
         ? formatData
         : {
             ...formatData,
             baseUrl: getBaseUrl(values.modelPlatform),
-            embeddingModelId: getEmbeddingModelId(values.modelPlatform)
+            embeddingModelId: hasCustomEmbedding
+              ? formatData.embeddingModelId
+              : getEmbeddingModelId(values.modelPlatform),
+            embeddingBaseUrl: hasCustomEmbedding ? formatData.embeddingBaseUrl : undefined,
+            embeddingApiKey: hasCustomEmbedding ? formatData.embeddingApiKey : undefined,
+            embeddingModelPlatform: hasCustomEmbedding ? 'custom' : undefined
           }
 
       updateModelSettings(params as unknown as ModelConfigProps)

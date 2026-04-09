@@ -35,7 +35,15 @@ const CardLayout: FC<LatestActivityCardProps> = (props) => {
       <div
         className={`flex flex-col items-center gap-1 flex-1 self-stretch ${isEmpty ? '' : 'justify-start items-start'} h-full`}>
         {!isEmpty ? (
-          children
+          Array.isArray(children) ? (
+            children.map((child, index) => (
+              <div key={index} className={index === children.length - 1 ? '!mb-0' : ''}>
+                {child}
+              </div>
+            ))
+          ) : (
+            children
+          )
         ) : (
           <div className="flex w-[340px] h-full flex-col justify-center items-center text-[var(--text-color-text-3,#6E718C)] text-center font-['Roboto'] text-[13px] font-normal leading-[22px] tracking-[0.039px]">
             {emptyText}

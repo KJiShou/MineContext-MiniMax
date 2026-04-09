@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useCallback, useRef, useEffect } from 'react'
+import { useDispatch } from 'react-redux'
 import {
   ChatMessage,
   ChatStreamRequest,
@@ -11,6 +12,10 @@ import {
 } from '@renderer/services/ChatStreamService'
 import { sanitizeAssistantContent } from '@renderer/utils/chat-content'
 import { get } from 'lodash'
+import {
+  addBackgroundGeneratingConversation,
+  removeBackgroundGeneratingConversation
+} from '@renderer/store/chat-history'
 
 export interface ChatState {
   messages: ChatMessage[]
@@ -33,6 +38,7 @@ export interface StreamingMessage {
 }
 
 export const useChatStream = () => {
+  const dispatch = useDispatch()
   const [chatState, setChatState] = useState<ChatState>({
     messages: [],
     isLoading: false,
@@ -43,11 +49,15 @@ export const useChatStream = () => {
 
   const [streamingMessage, setStreamingMessage] = useState<StreamingMessage | null>(null)
   const currentStreamingId = useRef<string | null>(null)
+  const currentConversationId = useRef<number | null>(null)
 
+  // Note: We don't abort streams on unmount to allow background generation
+  // when navigating between pages. Streams are aborted per-conversation via
+  // abortStream(conversationId) when explicitly stopped by user.
   useEffect(() => {
-    return () => {
-      chatStreamService.abortStream()
-    }
+    // Cleanup is intentionally not done here to allow background generation
+    // The conversation will be removed from backgroundGeneratingConversations
+    // when stream completes or errors via handleStreamComplete/handleStreamError
   }, [])
 
   const sendMessage = useCallback(
@@ -68,6 +78,10 @@ export const useChatStream = () => {
 
       setStreamingMessage(null)
       currentStreamingId.current = null
+      currentConversationId.current = conversation_id
+
+      // Dispatch to Redux to track this conversation as background generating
+      dispatch(addBackgroundGeneratingConversation(conversation_id))
 
       const request: ChatStreamRequest = {
         query: query.trim(),
@@ -85,7 +99,7 @@ export const useChatStream = () => {
         handleStreamError(error as Error)
       }
     },
-    [chatState.messages, chatState.isLoading, chatState.sessionId]
+    [chatState.messages, chatState.isLoading, chatState.sessionId, dispatch]
   )
 
   const handleStreamEvent = useCallback((event: StreamEvent) => {
@@ -195,6 +209,11 @@ export const useChatStream = () => {
 
       case 'completed': {
         const completedContent = sanitizeAssistantContent(event.content)
+        // Remove from background generating list
+        if (currentConversationId.current !== null) {
+          dispatch(removeBackgroundGeneratingConversation(currentConversationId.current))
+          currentConversationId.current = null
+        }
         if (completedContent.trim()) {
           const finalMessage: ChatMessage = {
             role: 'assistant',
@@ -241,35 +260,54 @@ export const useChatStream = () => {
     }
   }, [])
 
-  const handleStreamError = useCallback((error: Error) => {
-    console.error('Stream request error:', error)
+  const handleStreamError = useCallback(
+    (error: Error) => {
+      console.error('Stream request error:', error)
 
-    let errorMessage = error.message
-    if (error.name === 'TypeError' && error.message.includes('fetch')) {
-      errorMessage = 'Unable to connect to AI service, please check network connection and service status'
-    } else if (error.name === 'AbortError') {
-      errorMessage = 'Request has been cancelled'
-    }
+      let errorMessage = error.message
+      if (error.name === 'TypeError' && error.message.includes('fetch')) {
+        errorMessage = 'Unable to connect to AI service, please check network connection and service status'
+      } else if (error.name === 'AbortError') {
+        errorMessage = 'Request has been cancelled'
+      }
 
-    setChatState((prev) => ({
-      ...prev,
-      error: errorMessage,
-      isLoading: false
-    }))
-    setStreamingMessage(null)
-    currentStreamingId.current = null
-  }, [])
+      // Remove from background generating list
+      if (currentConversationId.current !== null) {
+        dispatch(removeBackgroundGeneratingConversation(currentConversationId.current))
+        currentConversationId.current = null
+      }
+
+      setChatState((prev) => ({
+        ...prev,
+        error: errorMessage,
+        isLoading: false
+      }))
+      setStreamingMessage(null)
+      currentStreamingId.current = null
+    },
+    [dispatch]
+  )
 
   const handleStreamComplete = useCallback(() => {
     console.log('Stream completed')
+    // Remove from background generating list
+    if (currentConversationId.current !== null) {
+      dispatch(removeBackgroundGeneratingConversation(currentConversationId.current))
+      currentConversationId.current = null
+    }
     setChatState((prev) => ({
       ...prev,
       isLoading: false
     }))
-  }, [])
+  }, [dispatch])
 
   const clearChat = useCallback(() => {
-    chatStreamService.abortStream()
+    chatStreamService.abortAllStreams()
+    // Remove all conversations from background generating list
+    if (currentConversationId.current !== null) {
+      dispatch(removeBackgroundGeneratingConversation(currentConversationId.current))
+      currentConversationId.current = null
+    }
     setChatState({
       messages: [],
       isLoading: false,
@@ -279,16 +317,21 @@ export const useChatStream = () => {
     })
     setStreamingMessage(null)
     currentStreamingId.current = null
-  }, [])
+  }, [dispatch])
 
   const stopStreaming = useCallback(() => {
-    chatStreamService.abortStream()
+    chatStreamService.abortAllStreams()
+    // Remove from background generating list
+    if (currentConversationId.current !== null) {
+      dispatch(removeBackgroundGeneratingConversation(currentConversationId.current))
+      currentConversationId.current = null
+    }
     setChatState((prev) => ({
       ...prev,
       isLoading: false
     }))
     setStreamingMessage(null)
-  }, [])
+  }, [dispatch])
 
   return {
     ...chatState,

@@ -101,7 +101,7 @@ curl http://localhost:11434/v1/embeddings \
 1. 启动 MineContext
 2. 进入**设置（Settings）**
 3. 选择 **MiniMax** 作为模型平台
-4. 输入你的 MiniMax API key（从 [platform.minimaxi.io]([https://platform.minimaxi.io/user-center/basic-information/interface-key](https://platform.minimax.io/user-center/payment/token-plan)) 获取）
+4. 输入你的 MiniMax API key（从 [platform.minimaxi.io](https://platform.minimaxi.io/user-center/basic-information/interface-key](https://platform.minimax.io/user-center/payment/token-plan) 获取）
 5. 选择 VLM 模型（如 **MiniMax-M2.7**）
 6. **启用"使用自定义 embedding 模型"**
 7. 填写 embedding 详情：

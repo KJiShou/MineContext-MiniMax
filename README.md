@@ -101,7 +101,7 @@ curl http://localhost:11434/v1/embeddings \
 1. Launch MineContext
 2. Go to **Settings**
 3. Select **MiniMax** as the model platform
-4. Enter your MiniMax API key (from [platform.minimaxi.io](https://platform.minimaxi.io/user-center/basic-information/interface-key](https://platform.minimax.io/user-center/payment/token-plan))
+4. Enter your MiniMax API key (from [platform.minimaxi.io](https://platform.minimax.io/user-center/payment/token-plan))
 5. Select a VLM model (e.g., **MiniMax-M2.7**)
 6. **Enable "Use custom embedding model"**
 7. Fill in embedding details:

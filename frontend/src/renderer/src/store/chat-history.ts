@@ -3,6 +3,7 @@
 
 import { createSlice, PayloadAction } from '@reduxjs/toolkit'
 import type { ConversationResponse } from '@renderer/services/conversation-service'
+import type { ChatMessage } from '@renderer/services/ChatStreamService'
 
 // Message type definition
 export interface Message {

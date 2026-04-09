@@ -5,7 +5,7 @@ import React, { useState, useCallback, useMemo, FC, useEffect } from 'react'
 import { Button, Input, Typography, Tag } from '@arco-design/web-react'
 import { IconStop } from '@arco-design/web-react/icon'
 import { useChatStream } from '@renderer/hooks/use-chat-stream'
-import { ChatContext, ChatMessage } from '@renderer/services/ChatStreamService'
+import { ChatContext } from '@renderer/services/ChatStreamService'
 import MarkdownIt from 'markdown-it'
 import chatEditIcon from '@renderer/assets/icons/chat-edit.svg'
 import chatSendIcon from '@renderer/assets/icons/chat-send.svg'
@@ -68,8 +68,7 @@ const AIAssistant: FC<AIAssistantProps> = (props) => {
     stopStreaming,
     clearChat,
     setChatState,
-    messageId: currentMessageId,
-    syncMessagesToRedux
+    messageId: currentMessageId
   } = useChatStream()
   const [conversationId, setConversationId] = useState<number>()
   const { runAsync: createConversation } = useRequest(conversationService.createConversation, { manual: true })

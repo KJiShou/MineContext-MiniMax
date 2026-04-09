@@ -52,7 +52,6 @@ export const useChatStream = () => {
   const [streamingMessage, setStreamingMessage] = useState<StreamingMessage | null>(null)
   const currentStreamingId = useRef<string | null>(null)
   const currentConversationId = useRef<number | null>(null)
-  const isInitialized = useRef(false)
 
   // Note: We don't abort streams on unmount to allow background generation
   // when navigating between pages. Streams are aborted per-conversation via

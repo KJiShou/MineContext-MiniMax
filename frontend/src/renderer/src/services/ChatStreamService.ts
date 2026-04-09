@@ -181,6 +181,14 @@ export class ChatStreamService {
     }
   }
 
+  // Abort all streaming requests
+  abortAllStreams(): void {
+    if (this.abortController) {
+      this.abortController.abort()
+      this.abortController = undefined
+    }
+  }
+
   // Generate a session ID
   generateSessionId(): string {
     return 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)

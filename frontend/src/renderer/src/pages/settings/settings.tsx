@@ -122,9 +122,10 @@ export interface StandardFormItemsProps {
   modelPlatform: ModelTypeList
   prefix: string
   useCustomEmbeddingInitial?: boolean
+  form?: any
 }
 const StandardFormItems: FC<StandardFormItemsProps> = (props) => {
-  const { modelPlatform, prefix, useCustomEmbeddingInitial = false } = props
+  const { modelPlatform, prefix, useCustomEmbeddingInitial = false, form: formInstance } = props
   const option = useMemo(() => {
     const foundItem = find(ModelInfoList, (item) => item.value === modelPlatform)
     return foundItem ? foundItem.option : []
@@ -213,7 +214,22 @@ const StandardFormItems: FC<StandardFormItemsProps> = (props) => {
           </div>
           {useCustomEmbedding && (
             <div className="flex flex-col gap-[8px]">
-              <span className="text-[#0B0B0F] font-roboto text-base font-normal leading-[22px]">Embedding model</span>
+              <div className="flex items-center justify-between">
+                <span className="text-[#0B0B0F] font-roboto text-base font-normal leading-[22px]">Embedding model</span>
+                <Button
+                  type="text"
+                  size="small"
+                  onClick={() => {
+                    formInstance.setFieldsValue({
+                      [`${prefix}-embeddingModelId`]: 'bge-m3',
+                      [`${prefix}-embeddingBaseUrl`]: 'http://localhost:11434/v1',
+                      [`${prefix}-embeddingApiKey`]: 'ollama'
+                    })
+                    Message.success('Ollama template applied')
+                  }}>
+                  Use Ollama Template
+                </Button>
+              </div>
               <FormItem
                 field={`${prefix}-embeddingModelId`}
                 className="!mb-0"
@@ -411,7 +427,7 @@ const Settings: FC<SettingsProps> = (props) => {
                   if (modelPlatform === ModelTypeList.Custom) {
                     return <CustomFormItems prefix={ModelTypeList.Custom} />
                   } else if (modelPlatform === ModelTypeList.Doubao) {
-                    return <StandardFormItems modelPlatform={modelPlatform} prefix={ModelTypeList.Doubao} />
+                    return <StandardFormItems modelPlatform={modelPlatform} prefix={ModelTypeList.Doubao} form={form} />
                   } else if (modelPlatform === ModelTypeList.MiniMax) {
                     const miniMaxInitial = !!(
                       values[`${ModelTypeList.MiniMax}-embeddingModelId`] &&
@@ -423,10 +439,11 @@ const Settings: FC<SettingsProps> = (props) => {
                         modelPlatform={modelPlatform}
                         prefix={ModelTypeList.MiniMax}
                         useCustomEmbeddingInitial={miniMaxInitial}
+                        form={form}
                       />
                     )
                   } else if (modelPlatform === ModelTypeList.OpenAI) {
-                    return <StandardFormItems modelPlatform={modelPlatform} prefix={ModelTypeList.OpenAI} />
+                    return <StandardFormItems modelPlatform={modelPlatform} prefix={ModelTypeList.OpenAI} form={form} />
                   } else {
                     return null
                   }

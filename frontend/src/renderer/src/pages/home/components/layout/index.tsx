@@ -33,7 +33,7 @@ const CardLayout: FC<LatestActivityCardProps> = (props) => {
       }
       className="flex w-full h-[160px] p-3 flex-col items-start gap-3 self-stretch rounded-[10px] border border-[rgba(225,227,239,0.80)] bg-white">
       <div
-        className={`flex flex-col items-center gap-1 flex-1 self-stretch ${isEmpty ? '' : 'justify-start items-start'} h-full`}>
+        className={`flex flex-col items-center gap-1 flex-1 self-stretch ${isEmpty ? '' : 'justify-start items-start'} h-full pb-1`}>
         {!isEmpty ? children : (
           <div className="flex w-[340px] h-full flex-col justify-center items-center text-[var(--text-color-text-3,#6E718C)] text-center font-['Roboto'] text-[13px] font-normal leading-[22px] tracking-[0.039px]">
             {emptyText}

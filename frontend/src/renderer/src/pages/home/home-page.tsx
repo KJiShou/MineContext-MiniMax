@@ -71,7 +71,7 @@ const HomePage: React.FC = () => {
                   </div>
                 </div>
                 <div className="flex items-start gap-3 flex-1 self-stretch">
-                  <div className="flex flex-col items-start gap-3 flex-1 self-stretch">
+                  <div className="flex flex-col items-start gap-3 flex-1 self-stretch pb-4">
                     <HeatmapEntry onChange={onChange} />
                     <ToDoCard selectedDays={selectedDays} />
                     <LatestActivityCard

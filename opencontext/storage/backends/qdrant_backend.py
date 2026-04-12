@@ -20,6 +20,11 @@ from opencontext.models.context import (
     Vectorize,
 )
 from opencontext.models.enums import ContentFormat, ContextType
+from opencontext.storage.backends.compatibility_state import (
+    build_embedding_signature,
+    has_signature_changed,
+    save_backend_signature,
+)
 from opencontext.storage.base_storage import IVectorStorageBackend, StorageType
 from opencontext.utils.logging_utils import get_logger
 
@@ -45,17 +50,25 @@ class QdrantBackend(IVectorStorageBackend):
         self._initialized = False
         self._config = None
         self._vector_size = None
+        self._embedding_signature: Dict[str, Any] = {}
 
     def initialize(self, config: Dict[str, Any]) -> bool:
         try:
             self._config = config
             qdrant_config = config.get("config", {})
+            self._embedding_signature = build_embedding_signature("qdrant", config)
 
             self._vector_size = qdrant_config.get("vector_size", None)
+            if self._vector_size is None:
+                self._vector_size = self._embedding_signature.get("output_dim")
             client_config = {
                 k: v for k, v in qdrant_config.items() if k != "vector_size"
             }
             self._client = QdrantClient(**client_config)
+
+            recreate_collections = self._should_recreate_collections()
+            if recreate_collections:
+                self._recreate_all_collections()
 
             context_types = [ct.value for ct in ContextType]
 
@@ -68,6 +81,7 @@ class QdrantBackend(IVectorStorageBackend):
             self._collections[TODO_COLLECTION] = TODO_COLLECTION
 
             self._initialized = True
+            save_backend_signature("qdrant", self._embedding_signature)
             logger.info(
                 f"Qdrant vector backend initialized successfully, created {len(self._collections)} collections"
             )
@@ -91,6 +105,49 @@ class QdrantBackend(IVectorStorageBackend):
             logger.info(f"Created Qdrant collection: {collection_name}")
         else:
             logger.debug(f"Qdrant collection already exists: {collection_name}")
+
+    def _should_recreate_collections(self) -> bool:
+        if has_signature_changed("qdrant", self._embedding_signature):
+            logger.warning(
+                "Embedding configuration changed for Qdrant; recreating vector collections to match the active model settings"
+            )
+            return True
+
+        expected_size = self._embedding_signature.get("output_dim")
+        if not expected_size:
+            return False
+
+        for collection_name in [ct.value for ct in ContextType] + [TODO_COLLECTION]:
+            if not self._client.collection_exists(collection_name):
+                continue
+            actual_size = self._get_collection_vector_size(collection_name)
+            if actual_size is not None and actual_size != expected_size:
+                logger.warning(
+                    f"Qdrant collection '{collection_name}' uses vector size {actual_size}, expected {expected_size}; recreating collections"
+                )
+                return True
+        return False
+
+    def _get_collection_vector_size(self, collection_name: str) -> Optional[int]:
+        try:
+            collection_info = self._client.get_collection(collection_name)
+            vectors = collection_info.config.params.vectors
+            if isinstance(vectors, dict):
+                first_vector = next(iter(vectors.values()), None)
+                return getattr(first_vector, "size", None)
+            return getattr(vectors, "size", None)
+        except Exception as e:
+            logger.warning(
+                f"Failed to inspect Qdrant collection '{collection_name}' compatibility: {e}"
+            )
+            return None
+
+    def _recreate_all_collections(self) -> None:
+        for collection_name in [ct.value for ct in ContextType] + [TODO_COLLECTION]:
+            if not self._client.collection_exists(collection_name):
+                continue
+            self._client.delete_collection(collection_name)
+            logger.warning(f"Deleted incompatible Qdrant collection: {collection_name}")
 
     def _check_connection(self) -> bool:
         if not self._client:

@@ -24,10 +24,17 @@ import chromadb
 from opencontext.llm.global_embedding_client import do_vectorize
 from opencontext.models.context import ContextProperties, ExtractedData, ProcessedContext, Vectorize
 from opencontext.models.enums import ContentFormat, ContextType
+from opencontext.storage.backends.compatibility_state import (
+    build_embedding_signature,
+    has_signature_changed,
+    save_backend_signature,
+)
 from opencontext.storage.base_storage import IVectorStorageBackend, StorageType
 from opencontext.utils.logging_utils import get_logger
 
 logger = get_logger(__name__)
+
+SIGNATURE_METADATA_PREFIX = "opencontext:"
 
 
 class ChromaDBBackend(IVectorStorageBackend):
@@ -50,6 +57,7 @@ class ChromaDBBackend(IVectorStorageBackend):
         self._pending_writes = []  # Pending writes
         self._write_lock = threading.Lock()  # Write lock
         self._cleanup_registered = False
+        self._embedding_signature: Dict[str, Any] = {}
 
         # Register graceful shutdown handler
         self._register_cleanup_handlers()
@@ -124,6 +132,7 @@ class ChromaDBBackend(IVectorStorageBackend):
         try:
             self._config = config
             chroma_config = config.get("config", {})
+            self._embedding_signature = build_embedding_signature("chromadb", config)
 
             # Check mode configuration
             mode = chroma_config.get("mode", "local")
@@ -160,27 +169,31 @@ class ChromaDBBackend(IVectorStorageBackend):
             # Get all available context_types
             context_types = [ct.value for ct in ContextType]
             config.get("collection_prefix", "opencontext")
+            recreate_collections = self._should_recreate_collections(context_types)
+
+            if recreate_collections:
+                self._recreate_all_collections(context_types)
 
             # Create a separate collection for each context_type
             for context_type in context_types:
                 collection_name = f"{context_type}"
                 collection = self._client.get_or_create_collection(
                     name=collection_name,
-                    metadata={"hnsw:space": "cosine", "context_type": context_type},
+                    metadata=self._build_collection_metadata({"context_type": context_type}),
                 )
                 self._collections[context_type] = collection
 
             # Create dedicated todo collection for deduplication
             todo_collection = self._client.get_or_create_collection(
                 name="todo",
-                metadata={
-                    "hnsw:space": "cosine",
-                    "description": "Todo embeddings for deduplication",
-                },
+                metadata=self._build_collection_metadata(
+                    {"description": "Todo embeddings for deduplication"}
+                ),
             )
             self._collections["todo"] = todo_collection
 
             self._initialized = True
+            save_backend_signature("chromadb", self._embedding_signature)
             logger.info(
                 f"ChromaDB vector backend initialized successfully, created {len(self._collections)} collections"
             )
@@ -267,7 +280,7 @@ class ChromaDBBackend(IVectorStorageBackend):
                     collection_name = f"{context_type}"
                     collection = self._client.get_or_create_collection(
                         name=collection_name,
-                        metadata={"hnsw:space": "cosine", "context_type": context_type},
+                        metadata=self._build_collection_metadata({"context_type": context_type}),
                     )
                     self._collections[context_type] = collection
 
@@ -288,6 +301,63 @@ class ChromaDBBackend(IVectorStorageBackend):
 
     def get_storage_type(self) -> StorageType:
         return StorageType.VECTOR_DB
+
+    def _build_collection_metadata(self, extra_metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        metadata = {"hnsw:space": "cosine"}
+        if extra_metadata:
+            metadata.update(extra_metadata)
+        for key, value in self._embedding_signature.items():
+            if value is None:
+                continue
+            metadata[f"{SIGNATURE_METADATA_PREFIX}{key}"] = value
+        return metadata
+
+    def _should_recreate_collections(self, context_types: List[str]) -> bool:
+        if has_signature_changed("chromadb", self._embedding_signature):
+            logger.warning(
+                "Embedding configuration changed for ChromaDB; recreating vector collections to match the active model settings"
+            )
+            return True
+
+        expected_dim = self._embedding_signature.get("output_dim")
+        for collection_name in context_types + ["todo"]:
+            collection = self._try_get_collection(collection_name)
+            if collection is None:
+                continue
+
+            actual_dim = self._get_collection_embedding_dim(collection)
+            if actual_dim is not None and expected_dim and actual_dim != expected_dim:
+                logger.warning(
+                    f"ChromaDB collection '{collection_name}' uses embedding size {actual_dim}, expected {expected_dim}; recreating collections"
+                )
+                return True
+        return False
+
+    def _try_get_collection(self, collection_name: str) -> Optional[chromadb.Collection]:
+        try:
+            return self._client.get_collection(name=collection_name)
+        except Exception:
+            return None
+
+    def _get_collection_embedding_dim(self, collection: chromadb.Collection) -> Optional[int]:
+        try:
+            sample = collection.peek(limit=1)
+            embeddings = sample.get("embeddings") or []
+            if embeddings and embeddings[0]:
+                return len(embeddings[0])
+        except Exception as e:
+            logger.warning(
+                f"Failed to inspect ChromaDB collection '{collection.name}' compatibility: {e}"
+            )
+        return None
+
+    def _recreate_all_collections(self, context_types: List[str]) -> None:
+        for collection_name in context_types + ["todo"]:
+            collection = self._try_get_collection(collection_name)
+            if collection is None:
+                continue
+            self._client.delete_collection(collection_name)
+            logger.warning(f"Deleted incompatible ChromaDB collection: {collection_name}")
 
     def _ensure_vectorized(self, context: ProcessedContext) -> List[float]:
         """Ensure the context is vectorized, and vectorize it if not"""

@@ -470,6 +470,7 @@ Be precise and factual. Only describe the visual evidence.""",
                 self._structured_log(trace_id, "tool_call", "timeout_error")
                 tool_result = None
             except Exception as e:
+                logger.exception(f"MiniMax tool call failed for trace_id={trace_id}: {e}")
                 self._structured_log(trace_id, "tool_call", "error", error=str(e))
                 tool_result = None
 
@@ -529,7 +530,8 @@ Now answer the user's request based on the above."""
                     tool_error=tool_error,
                 )
                 raise ValueError(
-                    "Configured VLM does not support image input and MiniMax image understanding did not return a usable result"
+                    f"Configured VLM does not support image input and MiniMax image understanding did not return a usable result "
+                    f"(status={tool_status}, confidence={tool_confidence}, error={tool_error})"
                 )
 
             content = enhanced_user_prompt

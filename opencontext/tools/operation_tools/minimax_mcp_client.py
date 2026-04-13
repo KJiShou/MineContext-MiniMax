@@ -196,7 +196,7 @@ class MiniMaxMcpClient:
                     )
                 except Exception as exc:
                     last_error = exc
-                    logger.warning(
+                    logger.error(
                         f"MiniMax MCP call failed on attempt {attempt + 1} ({self.describe_runtime()}): {exc}"
                     )
                     await self._close_locked()

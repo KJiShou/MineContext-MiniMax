@@ -78,7 +78,7 @@ class ConfigManager:
 
         bundle_dir = os.environ.get("CONTEXT_LAB_BUNDLE_DIR")
         if bundle_dir:
-            return os.path.join(os.path.expanduser("~"), "AppData", "Local", "MineContext")
+            return os.path.join(os.path.expanduser("~"), "AppData", "Roaming", "MineContext")
 
         return "."
 

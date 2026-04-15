@@ -21,8 +21,8 @@ Var DataDir
   ; Try to read existing data directory from registry
   ReadRegStr $DataDir HKCU "Software\MineContext" "DataDirectory"
   ${If} $DataDir == ""
-    ; Set default to AppData\Local\MineContext
-    StrCpy $DataDir "$LOCALAPPDATA\MineContext"
+    ; Set default to AppData\Roaming\MineContext (matches Electron's default userData path)
+    StrCpy $DataDir "$APPDATA\MineContext"
   ${EndIf}
 !macroend
 

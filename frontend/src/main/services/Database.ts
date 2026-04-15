@@ -68,9 +68,9 @@ export class DB {
   public static getInstance(dbName: string = 'app.db', dbPath1?: string): DB {
     if (!this.instance) {
       // It is recommended to place the database file in a fixed location, such as the data folder in the project root directory
+      // In dev mode, use ../persist/sqlite/ to share with backend
       const dbPath =
-        dbPath1 ||
-        path.join(!app.isPackaged && is.dev ? 'backend' : app.getPath('userData'), 'persist', 'sqlite', dbName)
+        dbPath1 || path.join(!app.isPackaged && is.dev ? '..' : app.getPath('userData'), 'persist', 'sqlite', dbName)
       this.instance = new DB(dbPath)
     }
     return this.instance

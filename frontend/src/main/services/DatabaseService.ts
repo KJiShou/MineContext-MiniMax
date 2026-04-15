@@ -22,13 +22,9 @@ class DatabaseManager extends VaultDatabaseService {
   constructor() {
     super()
     // Dynamically get the application path
-    // this.dbPath = path.join(app.getPath('userData'), "persist", "sqlite", "app.db")
-    this.dbPath = path.join(
-      !app.isPackaged && is.dev ? 'backend' : app.getPath('userData'),
-      'persist',
-      'sqlite',
-      'app.db'
-    )
+    // In dev mode, use ../persist/sqlite/app.db to share with backend's ./persist/sqlite/app.db
+    // In production, use app.getPath('userData')
+    this.dbPath = path.join(!app.isPackaged && is.dev ? '..' : app.getPath('userData'), 'persist', 'sqlite', 'app.db')
     logger.info('📁 Database path:', this.dbPath)
   }
 

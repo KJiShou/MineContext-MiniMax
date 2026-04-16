@@ -18,6 +18,8 @@ from opencontext.utils.json_encoder import CustomJSONEncoder
 
 THINK_OPEN_TAG = "<think"
 THINK_CLOSE_TAG = "</think"
+THINK_OPEN_TAG_ALT = "<think>"
+THINK_CLOSE_TAG_ALT = "</think>"
 
 
 def get_context_lab(request: Request) -> OpenContext:
@@ -44,7 +46,7 @@ def convert_resp(data: Any = None, code: int = 0, status: int = 200, message: st
 
 
 def sanitize_assistant_content(content: Any) -> str:
-    """Remove leaked <think>...</think> blocks from assistant-visible content."""
+    """Remove leaked ...</think> blocks from assistant-visible content."""
     if not content:
         return ""
 
@@ -54,10 +56,12 @@ def sanitize_assistant_content(content: Any) -> str:
 
     index = 0
     inside_think_block = False
+    think_open = THINK_OPEN_TAG
+    think_close = THINK_CLOSE_TAG
 
     while index < len(source):
         if inside_think_block:
-            close_index = lower_source.find(THINK_CLOSE_TAG, index)
+            close_index = lower_source.find(think_close, index)
             if close_index == -1:
                 break
 
@@ -77,7 +81,7 @@ def sanitize_assistant_content(content: Any) -> str:
         result.append(source[index:next_tag_start])
         remaining_lower = lower_source[next_tag_start:]
 
-        if remaining_lower.startswith(THINK_OPEN_TAG):
+        if remaining_lower.startswith(think_open):
             open_end = source.find(">", next_tag_start)
             if open_end == -1:
                 break
@@ -86,7 +90,27 @@ def sanitize_assistant_content(content: Any) -> str:
             inside_think_block = True
             continue
 
-        if remaining_lower.startswith(THINK_CLOSE_TAG):
+        if remaining_lower.startswith(think_close):
+            close_end = source.find(">", next_tag_start)
+            if close_end == -1:
+                break
+
+            index = close_end + 1
+            continue
+
+        # Check for alternate think tag format (...</think>)
+        if remaining_lower.startswith(THINK_OPEN_TAG_ALT):
+            open_end = source.find(">", next_tag_start)
+            if open_end == -1:
+                break
+
+            index = open_end + 1
+            inside_think_block = True
+            think_open = THINK_OPEN_TAG_ALT
+            think_close = THINK_CLOSE_TAG_ALT
+            continue
+
+        if remaining_lower.startswith(THINK_CLOSE_TAG_ALT):
             close_end = source.find(">", next_tag_start)
             if close_end == -1:
                 break
@@ -101,8 +125,10 @@ def sanitize_assistant_content(content: Any) -> str:
             possible_partial_tag += char
 
         if len(possible_partial_tag) > 1 and (
-            THINK_OPEN_TAG.startswith(possible_partial_tag)
-            or THINK_CLOSE_TAG.startswith(possible_partial_tag)
+            think_open.startswith(possible_partial_tag)
+            or think_close.startswith(possible_partial_tag)
+            or THINK_OPEN_TAG_ALT.startswith(possible_partial_tag)
+            or THINK_CLOSE_TAG_ALT.startswith(possible_partial_tag)
         ):
             break
 

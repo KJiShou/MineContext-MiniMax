@@ -15,6 +15,7 @@ from opencontext.config.global_config import get_prompt_group
 from opencontext.context_consumption.generation.debug_helper import DebugHelper
 from opencontext.llm.global_vlm_client import generate_with_messages_async
 from opencontext.models.enums import ContextType
+from opencontext.utils.think_stripper import sanitize_assistant_content
 from opencontext.storage.global_storage import get_storage
 from opencontext.tools.tool_definitions import ALL_TOOL_DEFINITIONS
 from opencontext.tools.tools_executor import ToolsExecutor
@@ -46,6 +47,9 @@ class ReportGenerator:
             result = await self._generate_report_with_llm(start_time, end_time)
             if not result:
                 return result
+
+            # Strip think tags from the generated report before storing
+            result = sanitize_assistant_content(result)
 
             from opencontext.managers.event_manager import EventType, publish_event
             from opencontext.models.enums import VaultType

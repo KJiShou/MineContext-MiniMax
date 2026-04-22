@@ -80,6 +80,7 @@ class ConsumptionManager:
 
         self._daily_report_time = content_gen_config.get("report", {}).get("time", "08:00")
         self._config_lock = threading.Lock()
+        self._report_generation_lock = threading.Lock()
         self._activity_generator = ReportGenerator()
         self._real_activity_monitor = RealtimeActivityMonitor()
         self._smart_tip_generator = SmartTipGenerator()
@@ -220,15 +221,26 @@ class ConsumptionManager:
                 target_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
 
                 if now >= target_time and self._last_report_date != today:
+                    report_lock_acquired = False
                     try:
+                        report_lock_acquired = self._report_generation_lock.acquire(blocking=False)
+                        if not report_lock_acquired:
+                            logger.info("Daily report generation already in progress, skipping")
+                            return
+
                         end_time = int(now.timestamp())
                         start_time = int((now - timedelta(days=1)).timestamp())
 
+                        logger.info("Daily report generation started in background")
                         asyncio.run(self._activity_generator.generate_report(start_time, end_time))
                         # Update last report date to prevent duplicate generation on the same day
                         self._last_report_date = today
+                        logger.info("Daily report generation completed in background")
                     except Exception as e:
-                        logger.exception(f"Failed to generate daily report: {e}")
+                        logger.exception(f"Daily report generation failed in background: {e}")
+                    finally:
+                        if report_lock_acquired:
+                            self._report_generation_lock.release()
             except Exception as e:
                 logger.error(f"Failed to check daily report generation time: {e}")
 
@@ -236,9 +248,16 @@ class ConsumptionManager:
                 self._task_timers["report"] = threading.Timer(
                     60 * 30, check_and_generate_daily_report
                 )
+                self._task_timers["report"].daemon = True
                 self._task_timers["report"].start()
 
-        check_and_generate_daily_report()
+        logger.info("Scheduled daily report check queued")
+        initial_check_thread = threading.Thread(
+            target=check_and_generate_daily_report,
+            name="daily-report-initial-check",
+            daemon=True,
+        )
+        initial_check_thread.start()
 
     def _start_activity_timer(self):
         """Start activity recording timer"""

@@ -117,8 +117,8 @@ class Monitor:
         # Start time
         self._start_time = datetime.now()
 
-        # Auto cleanup old monitoring data on startup
-        self._cleanup_old_data()
+        # Auto cleanup old monitoring data on startup (async to not block startup)
+        threading.Thread(target=self._cleanup_old_data, daemon=True).start()
 
         logger.info("System monitor initialized")
 

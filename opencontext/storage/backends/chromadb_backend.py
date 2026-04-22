@@ -343,7 +343,7 @@ class ChromaDBBackend(IVectorStorageBackend):
         try:
             sample = collection.peek(limit=1)
             embeddings = sample.get("embeddings") or []
-            if embeddings and embeddings[0]:
+            if len(embeddings) > 0 and embeddings[0] is not None:
                 return len(embeddings[0])
         except Exception as e:
             logger.warning(

@@ -70,7 +70,7 @@ if (Test-Path $ONEDIR_EXECUTABLE_WIN) {
     # Copy config directory
     if (Test-Path "config") {
         Write-Host "--> Copying 'config' directory to 'dist/'..." -ForegroundColor Yellow
-        Copy-Item -Recurse "config" "dist\"
+        Copy-Item -Recurse -Force "config" "dist\"
         Write-Host "    Config directory copied." -ForegroundColor Green
     } else {
         Write-Host "    Warning: 'config' directory not found." -ForegroundColor Yellow

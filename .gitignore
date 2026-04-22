@@ -10,6 +10,7 @@ __pycache__
 /venv/*
 /test_storage
 /config/runtime
+/config/.vector_backend_state/
 /test_script
 /config/user*
 .DS_Store
